@@ -2,7 +2,7 @@
 
 墨校台是一套面向中文文学创作者、编校者与出版协作者的本地优先开放出版工作台。项目以结构化母本为核心，贯通人工编校、版本溯源、媒体管理、语义组织与多平台出版。
 
-当前处于 `0.1.0` 建设阶段，已经建立桌面工作台、文枢领域模型、Ontology v1、出版渲染契约，以及可实际读写的 SQLite 本地资料库。现有“闲心子墨”数据尚未迁入本仓库，避免建设期污染正式作品事实源。
+当前处于 `0.1.1` 建设阶段，已经建立桌面工作台、文枢领域模型、Ontology v1、出版渲染契约，以及可实际读写的 SQLite 本地资料库。现有“闲心子墨”数据尚未迁入本仓库，避免建设期污染正式作品事实源。
 
 桌面工作台已经具备 JSON 审校包导入导出、900ms 自动保存、体裁与状态筛选、新增、批量文本拆分、清空前强制备份、重复候选双栏对照和语义版本快照。导入兼容既有 `XZM-EW 0.1`，内部 UUIDv7 不写回覆盖旧稳定 ID。
 
@@ -35,4 +35,4 @@ pnpm test:e2e
 
 源代码采用 [Mozilla Public License 2.0](LICENSE)，第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。桌面版不要求账号、不含遥测，文稿保存在本机；用户作品和媒体不随代码开源。详细边界见 [LICENSE_POLICY.md](LICENSE_POLICY.md)、[PRIVACY.md](PRIVACY.md) 与 [CONTENT_RIGHTS.md](CONTENT_RIGHTS.md)。
 
-首个 macOS Apple Silicon 开发预览包可执行 `pnpm dist:mac` 构建。未完成 Developer ID 签名和 Apple 公证的本地包仅用于技术验收，不能冒充正式稳定发行。
+macOS Apple Silicon 公开发行包通过 `pnpm dist:mac` 构建。该命令强制执行 Developer ID 签名、Apple 公证、票据装订和 Gatekeeper 验收，缺少发行凭据时拒绝输出公开包。

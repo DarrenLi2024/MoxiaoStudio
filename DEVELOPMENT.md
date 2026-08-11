@@ -16,8 +16,9 @@ pnpm test
 pnpm build
 pnpm check
 pnpm test:e2e
-pnpm dist:mac
 ```
+
+`pnpm dist:mac` 只用于正式 macOS 发布：它要求本机存在 Developer ID Application 证书和名为 `moxiao-notary` 的 notarytool 钥匙串凭据，并会依次执行签名、应用公证、DMG 公证、票据装订与 Gatekeeper 验收。完整流程见 [docs/MACOS_DISTRIBUTION.md](docs/MACOS_DISTRIBUTION.md)。
 
 ## 工作方式
 
