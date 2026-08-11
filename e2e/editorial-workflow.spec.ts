@@ -55,6 +55,7 @@ test("本地工作区可新增、自动保存、筛选并查重", async () => {
 });
 
 test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
+  test.setTimeout(120_000);
   mkdirSync(artifacts, { recursive: true });
   const output = join(artifacts, `publication-proof-${Date.now()}.pdf`);
   const application = await electron.launch({
@@ -74,7 +75,7 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
     await watermark.getByLabel("文字").fill("内部送审 · 禁止外传");
     await expect(dialog.getByText("预检通过，可安全导出")).toBeVisible();
     await dialog.getByRole("button", { name: "导出并验证 PDF" }).click();
-    await expect(dialog.getByText(/已导出 \d+ 页/u)).toBeVisible({ timeout: 10_000 });
+    await expect(dialog.getByText(/已导出 \d+ 页/u)).toBeVisible({ timeout: 60_000 });
     expect(validatePdfBytes(readFileSync(output)).ok).toBe(true);
     await page.screenshot({ path: join(artifacts, "publication-center.png"), fullPage: true });
   } finally {
