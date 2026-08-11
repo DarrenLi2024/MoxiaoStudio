@@ -42,6 +42,8 @@ SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义�
 
 默认开源渲染路径计划使用 Vivliostyle；专业印刷可选接入受许可的 Prince 或出版社指定引擎。PDF、EPUB、DOCX、Web 和闲心子墨内容包均消费同一 Publication IR。
 
+桌面端首个内置适配器使用 Electron Chromium 生成通用 Tagged PDF，实际支持文字水印、页眉页脚、页码、A4/A5/B5 和自定义尺寸。PDF/X、PDF/A、PDF/UA、CMYK、出血裁切和左右页镜像边距只有在适配器明确声明能力时才能启用；内置适配器不会虚报。详细边界见 [docs/PUBLICATION.md](docs/PUBLICATION.md)。
+
 ## 安全边界
 
 - Electron 渲染进程启用沙箱和上下文隔离，不直接获得 Node.js 能力。

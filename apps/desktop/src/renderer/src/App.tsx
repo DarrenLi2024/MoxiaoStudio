@@ -24,10 +24,11 @@ import {
 } from "lucide-react";
 import type { EditorialRecord, EditorialWorkspace, ReviewStatus } from "@moxiao/editorial";
 import { ontologyVersion } from "@moxiao/ontology";
+import type { PreflightIssue, PublicationProfile } from "@moxiao/publication";
 import type { DuplicateView } from "../../preload";
 
 type SaveMode = "loading" | "saved" | "dirty" | "saving" | "error" | "conflict";
-type DialogMode = "new" | "batch" | "duplicates" | null;
+type DialogMode = "new" | "batch" | "duplicates" | "publication" | null;
 
 const railItems = [
   { label: "文库", icon: LibraryBig, active: true },
@@ -80,6 +81,11 @@ export function App() {
   const [newForm, setNewForm] = useState("xinshi");
   const [newBody, setNewBody] = useState("");
   const [batchSource, setBatchSource] = useState("");
+  const [publicationProfile, setPublicationProfile] = useState<PublicationProfile | null>(null);
+  const [publicationHtml, setPublicationHtml] = useState("");
+  const [publicationIssues, setPublicationIssues] = useState<readonly PreflightIssue[]>([]);
+  const [publicationBusy, setPublicationBusy] = useState(false);
+  const [publicationReceipt, setPublicationReceipt] = useState("");
   const editCounter = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -176,6 +182,48 @@ export function App() {
     }
   }
 
+  async function openPublication(): Promise<void> {
+    try {
+      setPublicationBusy(true);
+      setPublicationReceipt("");
+      const preview = await window.moxiao!.publicationPreview();
+      setPublicationProfile(preview.profile);
+      setPublicationHtml(preview.html);
+      setPublicationIssues(preview.preflight.issues);
+      setDialogMode("publication");
+    } catch (error) {
+      setSaveMode("error");
+      setSaveError(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPublicationBusy(false);
+    }
+  }
+
+  useEffect(() => {
+    if (dialogMode !== "publication" || !publicationProfile) return;
+    const timer = setTimeout(() => {
+      void window.moxiao!.publicationPreview(publicationProfile).then((preview) => {
+        setPublicationHtml(preview.html);
+        setPublicationIssues(preview.preflight.issues);
+      }).catch((error: unknown) => setPublicationReceipt(error instanceof Error ? error.message : String(error)));
+    }, 260);
+    return () => clearTimeout(timer);
+  }, [dialogMode, publicationProfile]);
+
+  async function exportPublication(): Promise<void> {
+    if (!publicationProfile) return;
+    try {
+      setPublicationBusy(true);
+      setPublicationReceipt("");
+      const receipt = await window.moxiao!.exportPublication(publicationProfile);
+      if (!receipt.canceled) setPublicationReceipt(`已导出 ${receipt.validation?.pageCount ?? 0} 页 · ${Math.round((receipt.validation?.byteLength ?? 0) / 1024)} KB · ${receipt.contentHash?.slice(0, 19)}…`);
+    } catch (error) {
+      setPublicationReceipt(error instanceof Error ? error.message : String(error));
+    } finally {
+      setPublicationBusy(false);
+    }
+  }
+
   async function resolveDuplicate(removeId: string | null): Promise<void> {
     const updated = await window.moxiao!.resolveDuplicate(removeId);
     setWorkspace(updated);
@@ -205,7 +253,7 @@ export function App() {
           {railItems.map((item) => {
             const Icon = item.icon;
             return (
-            <button className={`rail-button ${"active" in item && item.active ? "is-active" : ""}`} aria-label={item.label} key={item.label}>
+            <button className={`rail-button ${"active" in item && item.active ? "is-active" : ""}`} aria-label={item.label} key={item.label} onClick={item.label === "出版" ? () => void openPublication() : undefined}>
               <Icon size={20} strokeWidth={1.7} /><span>{item.label}</span>
             </button>
           );})}
@@ -263,7 +311,7 @@ export function App() {
             </button>
             <button className="quiet-button" onClick={() => void refreshWorkspace(async () => { await window.moxiao!.createVersion(`定稿 ${workspace.revision}`); })}><Archive size={16} /> 生成版本</button>
             <button className="quiet-button" onClick={() => void refreshWorkspace(() => window.moxiao!.exportWorkspace())}><Upload size={16} /> 导出</button>
-            <button className="primary-button"><FileOutput size={16} /> 出版</button>
+            <button className="primary-button" onClick={() => void openPublication()} disabled={publicationBusy}><FileOutput size={16} /> 出版</button>
             <button className="icon-button bordered inspector-toggle" onClick={() => setInspectorOpen((value) => !value)} aria-label="切换语义检查器"><PanelRightClose size={17} /></button>
           </div>
         </header>
@@ -303,8 +351,8 @@ export function App() {
       <footer className="statusbar"><span><span className="online-dot" /> {runtimeLabel}</span><span>SQLite · WAL</span><span>修订 {workspace.revision}</span><span>{records.length} 篇 · 已删除 {workspace.records.length - records.length}</span><button><Command size={13} /> 命令</button></footer>
 
       {dialogMode && <div className="dialog-backdrop" role="presentation">
-        <section className={`work-dialog ${dialogMode === "duplicates" ? "duplicate-dialog" : ""}`} role="dialog" aria-modal="true" aria-label={{ new: "新增作品", batch: "批量补录", duplicates: "作品查重" }[dialogMode]}>
-          <header><div><span className="context-label">本地工作区</span><h2>{{ new: "新增作品", batch: "批量补录", duplicates: "作品查重" }[dialogMode]}</h2></div><button className="icon-button" onClick={() => setDialogMode(null)} aria-label="关闭"><X size={18} /></button></header>
+        <section className={`work-dialog ${dialogMode === "duplicates" ? "duplicate-dialog" : dialogMode === "publication" ? "publication-dialog" : ""}`} role="dialog" aria-modal="true" aria-label={{ new: "新增作品", batch: "批量补录", duplicates: "作品查重", publication: "出版中心" }[dialogMode]}>
+          <header><div><span className="context-label">本地工作区</span><h2>{{ new: "新增作品", batch: "批量补录", duplicates: "作品查重", publication: "出版中心" }[dialogMode]}</h2></div><button className="icon-button" onClick={() => setDialogMode(null)} aria-label="关闭"><X size={18} /></button></header>
           {dialogMode === "new" && <form onSubmit={(event) => { event.preventDefault(); void refreshWorkspace(() => window.moxiao!.addWork({ title: newTitle, form: newForm, body: newBody })).then(() => { setDialogMode(null); setNewTitle(""); setNewBody(""); }); }}>
             <label>作品题名<input required value={newTitle} onChange={(event) => setNewTitle(event.target.value)} /></label>
             <label>体裁<select value={newForm} onChange={(event) => setNewForm(event.target.value)}>{Object.entries(formLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
@@ -324,6 +372,18 @@ export function App() {
               <div className="comparison-grid">{currentDuplicate.comparison.map((row, index) => <div className={`comparison-row ${row.status}`} key={index}><span>{row.left || "∅"}</span><span>{row.right || "∅"}</span></div>)}</div>
               <footer><button className="quiet-button" onClick={() => void resolveDuplicate(null)}>两篇均保留</button><button className="danger-button" onClick={() => void resolveDuplicate(currentDuplicate.right.id)}>保留左篇，删除右篇</button><button className="danger-button" onClick={() => void resolveDuplicate(currentDuplicate.left.id)}>删除左篇，保留右篇</button></footer>
             </>}
+          </div>}
+          {dialogMode === "publication" && publicationProfile && <div className="publication-content">
+            <aside className="publication-controls">
+              <label>纸张<select value={publicationProfile.pageSize} onChange={(event) => setPublicationProfile({ ...publicationProfile, pageSize: event.target.value as PublicationProfile["pageSize"] })}><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option></select></label>
+              <fieldset><legend>页眉页脚</legend><label className="switch-label"><input type="checkbox" checked={publicationProfile.runningContent.enabled} onChange={(event) => setPublicationProfile({ ...publicationProfile, runningContent: { ...publicationProfile.runningContent, enabled: event.target.checked } })} />启用</label><label>页眉<input value={publicationProfile.runningContent.headerTemplate} onChange={(event) => setPublicationProfile({ ...publicationProfile, runningContent: { ...publicationProfile.runningContent, headerTemplate: event.target.value } })} /></label><label>页脚<input value={publicationProfile.runningContent.footerTemplate} onChange={(event) => setPublicationProfile({ ...publicationProfile, runningContent: { ...publicationProfile.runningContent, footerTemplate: event.target.value } })} /></label></fieldset>
+              <fieldset><legend>水印</legend><label className="switch-label"><input type="checkbox" checked={publicationProfile.watermark.enabled} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, enabled: event.target.checked } })} />启用</label><label>文字<input value={publicationProfile.watermark.content} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, content: event.target.value } })} /></label><label>位置<select value={publicationProfile.watermark.placement} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, placement: event.target.value as PublicationProfile["watermark"]["placement"] } })}><option value="center">居中</option><option value="corner">页角</option><option value="tile">平铺</option></select></label><label>透明度<input type="range" min="0.03" max="0.35" step="0.01" value={publicationProfile.watermark.opacity} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, opacity: Number(event.target.value) } })} /></label></fieldset>
+              <label>PDF 规范<select value={publicationProfile.pdfProfile} onChange={(event) => setPublicationProfile({ ...publicationProfile, pdfProfile: event.target.value as PublicationProfile["pdfProfile"] })}><option value="screen">通用屏幕 PDF</option><option value="PDF/X-4">PDF/X-4 印刷</option><option value="PDF/A-2b">PDF/A-2b 归档</option><option value="PDF/UA-1">PDF/UA-1 无障碍</option></select></label>
+              <div className={`preflight-card ${publicationIssues.some((issue) => issue.severity === "error") ? "has-errors" : "is-ready"}`}><strong>{publicationIssues.length ? `预检发现 ${publicationIssues.length} 项` : "预检通过，可安全导出"}</strong>{publicationIssues.map((issue) => <p key={issue.code}>{issue.message}</p>)}</div>
+              <button className="primary-button export-pdf-button" disabled={publicationBusy || publicationIssues.some((issue) => issue.severity === "error")} onClick={() => void exportPublication()}>{publicationBusy ? <LoaderCircle size={15} className="spin" /> : <FileOutput size={15} />} 导出并验证 PDF</button>
+              {publicationReceipt && <p className="publication-receipt">{publicationReceipt}</p>}
+            </aside>
+            <div className="publication-preview"><div className="preview-toolbar"><span>分页预览</span><span>{publicationProfile.pageSize} · {publicationProfile.pdfProfile}</span></div><iframe title="出版分页预览" sandbox="" srcDoc={publicationHtml} /></div>
           </div>}
         </section>
       </div>}

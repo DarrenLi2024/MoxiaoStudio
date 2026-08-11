@@ -1,6 +1,7 @@
 import { expect, test, _electron as electron } from "@playwright/test";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { validatePdfBytes } from "@moxiao/publication";
 
 const artifacts = resolve("artifacts/e2e");
 
@@ -48,6 +49,34 @@ test("本地工作区可新增、自动保存、筛选并查重", async () => {
     await expect(page.getByRole("dialog", { name: "作品查重" })).toBeVisible();
     await expect(page.getByText(/候选 1 \/ /u)).toBeVisible();
     await page.screenshot({ path: join(artifacts, "editorial-workflow.png"), fullPage: true });
+  } finally {
+    await application.close();
+  }
+});
+
+test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
+  mkdirSync(artifacts, { recursive: true });
+  const output = join(artifacts, `publication-proof-${Date.now()}.pdf`);
+  const application = await electron.launch({
+    args: [resolve("apps/desktop/out/main/index.js")],
+    env: { ...process.env, MOXIAO_PROFILE: `publication-${process.pid}-${Date.now()}`, MOXIAO_THEME: "light", MOXIAO_E2E_PDF_PATH: output }
+  });
+
+  try {
+    const page = await application.firstWindow();
+    await expect(page.getByRole("heading", { name: "一卷通校" })).toBeVisible();
+    await page.getByRole("button", { name: "出版", exact: true }).last().click();
+    const dialog = page.getByRole("dialog", { name: "出版中心" });
+    await expect(dialog).toBeVisible();
+    await expect(page.frameLocator('iframe[title="出版分页预览"]').getByText("春山小记")).toBeVisible();
+    const watermark = dialog.getByRole("group", { name: "水印" });
+    await watermark.getByLabel("启用").check();
+    await watermark.getByLabel("文字").fill("内部送审 · 禁止外传");
+    await expect(dialog.getByText("预检通过，可安全导出")).toBeVisible();
+    await dialog.getByRole("button", { name: "导出并验证 PDF" }).click();
+    await expect(dialog.getByText(/已导出 \d+ 页/u)).toBeVisible({ timeout: 10_000 });
+    expect(validatePdfBytes(readFileSync(output)).ok).toBe(true);
+    await page.screenshot({ path: join(artifacts, "publication-center.png"), fullPage: true });
   } finally {
     await application.close();
   }

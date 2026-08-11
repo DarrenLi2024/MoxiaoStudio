@@ -1,11 +1,12 @@
 import { describe, expect, it } from "vitest";
 import { createEntityId } from "@moxiao/domain";
-import { preflightPublication, type PublicationProfile, type RendererCapabilities } from "./index";
+import { chromiumRendererCapabilities, createDefaultPublicationProfile, electronPrintOptions, preflightPublication, renderPublicationHtml, validatePdfBytes, validatePublication, type PublicationDocument, type PublicationProfile, type RendererCapabilities } from "./index";
 
 const profile: PublicationProfile = {
   id: createEntityId(),
   name: "出版社送审样书",
   pageSize: "A5",
+  marginsMm: { top: 22, right: 19, bottom: 22, left: 19 },
   writingMode: "horizontal-tb",
   bleedMm: 3,
   cropMarks: true,
@@ -36,6 +37,7 @@ const professionalRenderer: RendererCapabilities = {
   adapterId: "professional-test",
   adapterVersion: "1.0.0",
   watermark: true,
+  imageWatermark: true,
   watermarkLayers: true,
   runningHeaders: true,
   differentOddEven: true,
@@ -72,5 +74,37 @@ describe("出版能力预检", () => {
       "print-marks.unsupported",
       "pdf-profile.unsupported"
     ]));
+  });
+
+  it("同一配置生成分页 HTML、Electron 打印参数与显式水印页眉页脚", () => {
+    const document: PublicationDocument = {
+      id: createEntityId(), expressionId: createEntityId(), expressionHash: "sha256:test", title: "闲心子墨", language: "zh-CN",
+      sections: [{ id: createEntityId(), role: "body", title: "春日", blocks: [{ type: "verse", lines: ["春风入砚池"] }] }]
+    };
+    const draft = { ...createDefaultPublicationProfile(createEntityId()), watermark: { ...createDefaultPublicationProfile(createEntityId()).watermark, enabled: true, content: "内部审校" } };
+    const html = renderPublicationHtml(document, draft);
+    expect(html).toContain("内部审校");
+    expect(html).toContain("@top-center");
+    expect(html).toContain('counter(page) " 页 · 共 " counter(pages)');
+    expect(html).toContain("春风入砚池");
+    expect(electronPrintOptions(draft).pageSize).toBe("A5");
+    expect(preflightPublication(draft, chromiumRendererCapabilities).ok).toBe(true);
+  });
+
+  it("验证 PDF 签名、页面与结束标记", () => {
+    const valid = new TextEncoder().encode(`%PDF-1.7\n${"x".repeat(1100)}\n/Type /Page\n%%EOF`);
+    expect(validatePdfBytes(valid)).toMatchObject({ ok: true, pageCount: 1 });
+    expect(validatePdfBytes(new TextEncoder().encode("not-pdf")).ok).toBe(false);
+  });
+
+  it("导出验证器阻止版权未确认的插图和乱码进入成品", () => {
+    const assetId = createEntityId();
+    const document: PublicationDocument = {
+      id: createEntityId(), expressionId: createEntityId(), expressionHash: "sha256:test", title: "插图册", language: "zh-CN",
+      sections: [{ id: createEntityId(), role: "body", title: "篇一", blocks: [{ type: "image", assetId, alt: "" }, { type: "paragraph", text: "乱码�" }] }]
+    };
+    const result = validatePublication(document, createDefaultPublicationProfile(createEntityId()), chromiumRendererCapabilities);
+    expect(result.ok).toBe(false);
+    expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(["image.alt.required", "asset.rights.unresolved", "text.replacement-character"]));
   });
 });

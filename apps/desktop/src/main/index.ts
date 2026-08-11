@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readFileSync, renameSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -6,6 +7,7 @@ import {
   compareDuplicatePair,
   createNewRecord,
   createWorkspace,
+  digest,
   findDuplicates,
   importLegacyWorkspace,
   markForDeletion,
@@ -16,6 +18,17 @@ import {
   type EditorialWorkspace
 } from "@moxiao/editorial";
 import { WorkspaceStore } from "@moxiao/storage";
+import {
+  chromiumRendererCapabilities,
+  createDefaultPublicationProfile,
+  electronPrintOptions,
+  renderPublicationHtml,
+  validatePdfBytes,
+  validatePublication,
+  type PublicationDocument,
+  type PublicationProfile
+} from "@moxiao/publication";
+import { createEntityId } from "@moxiao/domain";
 
 const WORKSPACE_ID = "local-main";
 const FORM_LABELS = {
@@ -76,10 +89,71 @@ function saveWorkspace(workspace: EditorialWorkspace): EditorialWorkspace {
   return activeStore().saveWorkspace(WORKSPACE_ID, workspace, workspace.revision);
 }
 
-function atomicWrite(filePath: string, text: string): void {
+function atomicWrite(filePath: string, value: string | Uint8Array): void {
   const temporary = `${filePath}.${process.pid}.tmp`;
-  writeFileSync(temporary, text, { encoding: "utf8", mode: 0o600 });
+  if (typeof value === "string") writeFileSync(temporary, value, { encoding: "utf8", mode: 0o600 });
+  else writeFileSync(temporary, value, { mode: 0o600 });
   renameSync(temporary, filePath);
+}
+
+function publicationDocument(workspace: EditorialWorkspace): PublicationDocument {
+  const activeRecords = workspace.records.filter((record) => record.operation !== "delete");
+  return {
+    id: createEntityId(),
+    expressionId: createEntityId(),
+    expressionHash: `sha256:${digest(workspace)}`,
+    title: "本地文学项目",
+    language: "zh-CN",
+    sections: activeRecords.map((record) => {
+      const work = record.draft.work;
+      const reading = record.draft.reading;
+      const blocks: PublicationDocument["sections"][number]["blocks"][number][] = [];
+      if (work.prose?.trim()) blocks.push({ type: "paragraph", text: work.prose.trim() });
+      else blocks.push({ type: "verse", lines: work.lines });
+      if (work.compositionNote?.trim()) blocks.push({ type: "annotation", marker: "创作题注", text: work.compositionNote.trim() });
+      if (reading?.translation?.trim()) blocks.push({ type: "heading", level: 2, text: "今译" }, { type: "paragraph", text: reading.translation.trim() });
+      for (const annotation of reading?.annotations ?? []) blocks.push({ type: "annotation", marker: annotation.anchor, text: annotation.note });
+      if (reading?.appreciation?.trim()) blocks.push({ type: "heading", level: 2, text: "赏析" }, { type: "paragraph", text: reading.appreciation.trim() });
+      return { id: record.entityId, role: "body" as const, title: work.editorialTitle?.trim() || work.title.trim() || "未题名", blocks };
+    })
+  };
+}
+
+function publicationPreview(profileValue?: PublicationProfile): {
+  profile: PublicationProfile;
+  document: PublicationDocument;
+  html: string;
+  preflight: ReturnType<typeof validatePublication>;
+  capabilities: typeof chromiumRendererCapabilities;
+} {
+  const profile = profileValue ?? createDefaultPublicationProfile(createEntityId());
+  const document = publicationDocument(loadWorkspace());
+  return { profile, document, html: renderPublicationHtml(document, profile), preflight: validatePublication(document, profile, chromiumRendererCapabilities), capabilities: chromiumRendererCapabilities };
+}
+
+async function exportPublication(profile: PublicationProfile): Promise<unknown> {
+  const preview = publicationPreview(profile);
+  if (!preview.document.sections.length) throw new Error("工作区没有可出版作品");
+  if (!preview.preflight.ok) throw new Error(`出版预检未通过：${preview.preflight.issues.map((issue) => issue.message).join("；")}`);
+  let filePath = process.env.MOXIAO_E2E_PDF_PATH;
+  if (!filePath) {
+    const selection = await dialog.showSaveDialog({ title: "导出排印 PDF", defaultPath: "墨校台-排印稿.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] });
+    if (selection.canceled || !selection.filePath) return { canceled: true };
+    filePath = selection.filePath;
+  }
+  const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  try {
+    await printWindow.loadURL(`data:text/html;base64,${Buffer.from(preview.html).toString("base64")}`);
+    await printWindow.webContents.executeJavaScript("document.fonts.ready.then(() => true)");
+    const bytes = await printWindow.webContents.printToPDF(electronPrintOptions(profile));
+    const validation = validatePdfBytes(bytes);
+    if (!validation.ok) throw new Error(`PDF 导出验证失败：${validation.issues.map((issue) => issue.message).join("；")}`);
+    atomicWrite(filePath, bytes);
+    const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
+    return { canceled: false, filePath, contentHash, validation, profile: profile.pdfProfile };
+  } finally {
+    printWindow.destroy();
+  }
 }
 
 function createWindow(): void {
@@ -184,6 +258,8 @@ function registerIpc(): void {
     else workspace.records.splice(index, 1);
     return saveWorkspace(workspace);
   });
+  ipcMain.handle("moxiao:publication:preview", (_event, profile?: PublicationProfile) => publicationPreview(profile));
+  ipcMain.handle("moxiao:publication:export", (_event, profile: PublicationProfile) => exportPublication(profile));
 }
 
 app.whenReady().then(() => {
