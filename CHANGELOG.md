@@ -19,3 +19,4 @@
 - 建立 macOS Apple Silicon DMG 构建配置和 GitHub CI/Dependabot 基线。
 - 生成并挂载验收首个 Apple Silicon DMG，从安装包内完成冷启动冒烟测试。
 - 稳定云端窄屏下的出版主入口定位，并放宽 PDF 成品验收等待窗口。
+- GitHub Actions 升级到 Node 24 运行时的官方主版本，消除旧运行时弃用隐患。
