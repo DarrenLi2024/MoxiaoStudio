@@ -9,6 +9,8 @@ apps/desktop          Electron 主进程、预加载桥与 React 工作台
 packages/domain       作品、表达、文稿树、版本、变更与合并规则
 packages/ontology     实体类型、关系词表与语义约束
 packages/publication  Publication IR、出版配置、渲染能力与预检
+packages/editorial    XZM-EW 兼容摄取、人工编校工作区、查重与安全合并
+packages/storage      SQLite 事务仓储、恢复日志、语义版本、墓碑与 Outbox
 ```
 
 ## 四层出版实体
@@ -26,7 +28,9 @@ packages/publication  Publication IR、出版配置、渲染能力与预检
 
 ## 合并与同步预留
 
-核心变更以节点为单位记录。三方合并比较 base/ours/theirs：单边变更直接接纳，两边相同变更直接合并，同节点不同变更产生人工冲突。P0 先固化数据契约，Outbox、远端同步和多人协作后续实现。
+核心变更以节点为单位记录。三方合并比较 base/ours/theirs：单边变更直接接纳，两边相同变更直接合并，同节点不同变更产生人工冲突。SQLite 已落 Outbox 与墓碑，当前只负责可靠记录本地变更；远端投递和多人协作仍是后续适配器，不得反向侵入母本事务。
+
+桌面端不再依赖本地 HTTP 保存服务。渲染进程通过窄化 IPC 交给主进程事务写入 SQLite；每次保存使用修订号乐观锁，并同时写恢复快照。旧审校包导入按范围、稳定 ID、基线哈希三重核验，命中已有记录时保留内部实体 UUID，避免重复导入造成身份漂移。
 
 ## Ontology
 

@@ -6,9 +6,18 @@
 pnpm typecheck
 pnpm test
 pnpm build
+pnpm test:e2e
 ```
 
 `pnpm check` 必须顺序执行上述三项并返回退出码 0。
+
+桌面关键链路在构建后运行 `pnpm test:e2e`。测试使用独立临时资料库，启动真实 Electron 窗口，验证新增、编辑自动保存、重载持久化、体裁筛选和查重入口；截图保存到 `artifacts/e2e/`，不得连接用户正式资料库。
+
+兼容旧审校包可执行：
+
+```bash
+pnpm audit:workspace "/绝对路径/墨校台-审校包.json"
+```
 
 ## 领域测试
 

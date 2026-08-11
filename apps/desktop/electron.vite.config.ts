@@ -4,10 +4,15 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin({ exclude: ["@moxiao/domain", "@moxiao/editorial", "@moxiao/storage"] })]
   },
   preload: {
-    plugins: [externalizeDepsPlugin()]
+    plugins: [externalizeDepsPlugin({ exclude: ["@moxiao/editorial", "@moxiao/storage"] })],
+    build: {
+      rollupOptions: {
+        output: { format: "cjs", entryFileNames: "index.cjs" }
+      }
+    }
   },
   renderer: {
     resolve: {

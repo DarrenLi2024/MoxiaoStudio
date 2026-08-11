@@ -1,10 +1,8 @@
-import type { MoxiaoRuntimeInfo } from "../../preload";
+import type { MoxiaoApi } from "../../preload";
 
 declare global {
   interface Window {
-    moxiao?: {
-      runtime(): Promise<MoxiaoRuntimeInfo>;
-    };
+    moxiao?: MoxiaoApi;
   }
 }
 
