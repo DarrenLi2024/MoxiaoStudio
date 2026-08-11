@@ -18,4 +18,4 @@
 - 升级 Electron 41.10.3，修复已公开高危漏洞，并增加 CSP、导航拦截与 IPC 输入边界。
 - 建立 macOS Apple Silicon DMG 构建配置和 GitHub CI/Dependabot 基线。
 - 生成并挂载验收首个 Apple Silicon DMG，从安装包内完成冷启动冒烟测试。
-- 放宽云端 PDF 成品验收的等待窗口，兼容 GitHub macOS 运行器的冷启动性能。
+- 稳定云端窄屏下的出版主入口定位，并放宽 PDF 成品验收等待窗口。

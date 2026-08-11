@@ -66,7 +66,7 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
   try {
     const page = await application.firstWindow();
     await expect(page.getByRole("heading", { name: "一卷通校" })).toBeVisible();
-    await page.getByRole("button", { name: "出版", exact: true }).last().click();
+    await page.getByRole("button", { name: "出版", exact: true }).first().click();
     const dialog = page.getByRole("dialog", { name: "出版中心" });
     await expect(dialog).toBeVisible();
     await expect(page.frameLocator('iframe[title="出版分页预览"]').getByText("春山小记")).toBeVisible();
