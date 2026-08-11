@@ -1,0 +1,29 @@
+{
+  "name": "@moxiao/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "./out/main/index.js",
+  "scripts": {
+    "dev": "electron-vite dev",
+    "build": "electron-vite build",
+    "preview": "electron-vite preview",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@moxiao/domain": "workspace:*",
+    "@moxiao/ontology": "workspace:*",
+    "@moxiao/publication": "workspace:*",
+    "lucide-react": "^0.468.0",
+    "react": "^19.1.1",
+    "react-dom": "^19.1.1"
+  },
+  "devDependencies": {
+    "@types/react": "^19.1.10",
+    "@types/react-dom": "^19.1.7",
+    "@vitejs/plugin-react": "^4.7.0",
+    "electron": "40.10.3",
+    "electron-vite": "^4.0.0",
+    "vite": "^7.1.3"
+  }
+}
