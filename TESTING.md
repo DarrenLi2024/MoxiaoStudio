@@ -20,6 +20,14 @@ pnpm test:e2e
 pnpm audit:workspace "/绝对路径/墨校台-审校包.json"
 ```
 
+闲心子墨适配器使用真实项目快照做只读往返：
+
+```bash
+pnpm audit:xianxinzimo "/绝对路径/PoetryApp1.0"
+```
+
+输出必须报告零语义差异。适配器通过后仍要在闲心子墨仓库运行该项目自身的 `audit-editorial-structure.mjs`、`audit-pronunciations.mjs` 和 `audit-natural-readings.mjs`，两边门禁不能互相替代。
+
 ## 领域测试
 
 - UUIDv7 格式与时间排序性质。

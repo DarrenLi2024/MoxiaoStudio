@@ -103,6 +103,12 @@ importers:
         specifier: workspace:*
         version: link:../editorial
 
+  packages/xianxinzimo-adapter:
+    dependencies:
+      '@moxiao/editorial':
+        specifier: workspace:*
+        version: link:../editorial
+
 packages:
 
   '@babel/code-frame@7.29.7':

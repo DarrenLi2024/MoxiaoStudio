@@ -11,6 +11,7 @@ packages/ontology     实体类型、关系词表与语义约束
 packages/publication  Publication IR、出版配置、渲染能力与预检
 packages/editorial    XZM-EW 兼容摄取、人工编校工作区、查重与安全合并
 packages/storage      SQLite 事务仓储、恢复日志、语义版本、墓碑与 Outbox
+packages/xianxinzimo-adapter  闲心子墨资源与文枢工作区之间的只读防腐层
 ```
 
 ## 四层出版实体
@@ -43,6 +44,8 @@ SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义�
 默认开源渲染路径计划使用 Vivliostyle；专业印刷可选接入受许可的 Prince 或出版社指定引擎。PDF、EPUB、DOCX、Web 和闲心子墨内容包均消费同一 Publication IR。
 
 桌面端首个内置适配器使用 Electron Chromium 生成通用 Tagged PDF，实际支持文字水印、页眉页脚、页码、A4/A5/B5 和自定义尺寸。PDF/X、PDF/A、PDF/UA、CMYK、出血裁切和左右页镜像边距只有在适配器明确声明能力时才能启用；内置适配器不会虚报。详细边界见 [docs/PUBLICATION.md](docs/PUBLICATION.md)。
+
+闲心子墨适配器按文件哈希摄取作品、笺读、语境校音、朗读轨与媒体清单，并提供从 App 资源到文枢工作区再回到原资源结构的语义往返。适配器不直接写 iOS 仓库；交付包、媒体权利与验证流程见 [docs/XIANXINZIMO_ADAPTER.md](docs/XIANXINZIMO_ADAPTER.md)。
 
 ## 安全边界
 
