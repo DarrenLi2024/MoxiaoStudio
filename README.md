@@ -31,6 +31,8 @@ pnpm test:e2e
 
 具体工程边界见 [ARCHITECTURE.md](ARCHITECTURE.md)，开发规则见 [DEVELOPMENT.md](DEVELOPMENT.md)，测试矩阵见 [TESTING.md](TESTING.md)。
 
-## 开源状态
+## 开源与隐私
 
-仓库当前标记为 `UNLICENSED`，原因是正式公开前仍需完成字体、模板、样例内容和第三方渲染器的许可证审计。完成审计后再落正式开源许可证，不能仅修改 `package.json` 字段冒充合规开放。
+源代码采用 [Mozilla Public License 2.0](LICENSE)，第三方声明见 [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)。桌面版不要求账号、不含遥测，文稿保存在本机；用户作品和媒体不随代码开源。详细边界见 [LICENSE_POLICY.md](LICENSE_POLICY.md)、[PRIVACY.md](PRIVACY.md) 与 [CONTENT_RIGHTS.md](CONTENT_RIGHTS.md)。
+
+首个 macOS Apple Silicon 开发预览包可执行 `pnpm dist:mac` 构建。未完成 Developer ID 签名和 Apple 公证的本地包仅用于技术验收，不能冒充正式稳定发行。

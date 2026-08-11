@@ -11,3 +11,4 @@ coverage/
 .moxiao/
 artifacts/
 tmp/
+release/

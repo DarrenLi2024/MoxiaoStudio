@@ -14,3 +14,7 @@
 - 接入分页 HTML 与真实 Tagged PDF 导出，增加资源权利、乱码及 PDF 成品验证门禁。
 - 建立闲心子墨内容适配器和 `XZM-XIANXIN-CONTENT 1.0` 内容包，覆盖作品、笺读、校音、朗读及媒体清单。
 - 用真实闲心子墨工作树完成 233 条作品记录的无损语义往返，并保持源仓库只读。
+- 开放 MPL-2.0 许可证，补齐隐私、内容权利、AIGC、第三方声明、社区规范与发布门禁。
+- 升级 Electron 41.10.3，修复已公开高危漏洞，并增加 CSP、导航拦截与 IPC 输入边界。
+- 建立 macOS Apple Silicon DMG 构建配置和 GitHub CI/Dependabot 基线。
+- 生成并挂载验收首个 Apple Silicon DMG，从安装包内完成冷启动冒烟测试。

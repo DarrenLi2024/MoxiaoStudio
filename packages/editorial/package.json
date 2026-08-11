@@ -2,6 +2,7 @@
   "name": "@moxiao/editorial",
   "version": "0.1.0",
   "private": true,
+  "license": "MPL-2.0",
   "type": "module",
   "exports": "./src/index.ts",
   "scripts": {

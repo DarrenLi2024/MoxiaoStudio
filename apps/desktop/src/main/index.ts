@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, renameSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
@@ -25,6 +25,7 @@ import {
   renderPublicationHtml,
   validatePdfBytes,
   validatePublication,
+  validatePublicationProfile,
   type PublicationDocument,
   type PublicationProfile
 } from "@moxiao/publication";
@@ -126,7 +127,7 @@ function publicationPreview(profileValue?: PublicationProfile): {
   preflight: ReturnType<typeof validatePublication>;
   capabilities: typeof chromiumRendererCapabilities;
 } {
-  const profile = profileValue ?? createDefaultPublicationProfile(createEntityId());
+  const profile = profileValue ? validatePublicationProfile(profileValue) : createDefaultPublicationProfile(createEntityId());
   const document = publicationDocument(loadWorkspace());
   return { profile, document, html: renderPublicationHtml(document, profile), preflight: validatePublication(document, profile, chromiumRendererCapabilities), capabilities: chromiumRendererCapabilities };
 }
@@ -142,6 +143,7 @@ async function exportPublication(profile: PublicationProfile): Promise<unknown> 
     filePath = selection.filePath;
   }
   const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+  printWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   try {
     await printWindow.loadURL(`data:text/html;base64,${Buffer.from(preview.html).toString("base64")}`);
     await printWindow.webContents.executeJavaScript("document.fonts.ready.then(() => true)");
@@ -174,6 +176,8 @@ function createWindow(): void {
   });
 
   window.once("ready-to-show", () => window.show());
+  window.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  window.webContents.on("will-navigate", (event) => event.preventDefault());
   if (process.env.ELECTRON_RENDERER_URL) void window.loadURL(process.env.ELECTRON_RENDERER_URL);
   else void window.loadFile(join(__dirname, "../renderer/index.html"));
 }
@@ -192,6 +196,7 @@ function registerIpc(): void {
       filters: [{ name: "墨校台审校包", extensions: ["json"] }]
     });
     if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+    if (statSync(selection.filePaths[0]).size > 50 * 1024 * 1024) throw new Error("审校包超过 50 MB 安全上限");
     const incoming = JSON.parse(readFileSync(selection.filePaths[0], "utf8")) as unknown;
     const result = mergeWorkspace(loadWorkspace(), incoming);
     const workspace = saveWorkspace(result.workspace);
@@ -223,12 +228,15 @@ function registerIpc(): void {
   });
 
   ipcMain.handle("moxiao:workspace:add", (_event, input: { title: string; form: string; body: string }) => {
+    if (!input || typeof input.title !== "string" || typeof input.body !== "string" || typeof input.form !== "string") throw new Error("新增作品参数无效");
+    if (!FORM_LABELS[input.form as keyof typeof FORM_LABELS] || !input.title.trim() || input.title.length > 300 || !input.body.trim() || input.body.length > 2_000_000) throw new Error("新增作品内容为空或超过安全上限");
     const workspace = loadWorkspace();
     workspace.records.push(createNewRecord({ ...input, sequence: nextSequence(workspace) }));
     return saveWorkspace(workspace);
   });
 
   ipcMain.handle("moxiao:workspace:batch-add", (_event, input: { source: string; defaultForm: string }) => {
+    if (!input || typeof input.source !== "string" || typeof input.defaultForm !== "string" || input.source.length > 10_000_000 || !FORM_LABELS[input.defaultForm as keyof typeof FORM_LABELS]) throw new Error("批量补录参数无效或超过 10 MB 安全上限");
     const workspace = loadWorkspace();
     const parsed = parseBatchSource(input.source, input.defaultForm, FORM_LABELS);
     const first = nextSequence(workspace);

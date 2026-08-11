@@ -2,11 +2,16 @@
   "name": "@moxiao/desktop",
   "version": "0.1.0",
   "private": true,
+  "license": "MPL-2.0",
+  "description": "面向中文文学创作者与编校者的本地优先开放出版工作台",
+  "author": "Moxiao Studio contributors",
   "type": "module",
   "main": "./out/main/index.js",
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
+    "dist:mac": "pnpm build && electron-builder --mac dmg --arm64 --publish never",
+    "pack:mac": "pnpm build && electron-builder --mac dir --arm64 --publish never",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
@@ -24,8 +29,41 @@
     "@types/react": "^19.1.10",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^4.7.0",
-    "electron": "40.10.3",
+    "electron": "41.10.3",
+    "electron-builder": "^26.15.3",
     "electron-vite": "^4.0.0",
     "vite": "^7.1.3"
+  },
+  "build": {
+    "appId": "com.moxiaostudio.desktop",
+    "productName": "墨校台文枢",
+    "asar": true,
+    "directories": {
+      "output": "../../release",
+      "buildResources": "../../build"
+    },
+    "files": [
+      "out/**/*",
+      "package.json"
+    ],
+    "extraResources": [
+      { "from": "../../LICENSE", "to": "LICENSE" },
+      { "from": "../../THIRD_PARTY_NOTICES.md", "to": "THIRD_PARTY_NOTICES.md" }
+    ],
+    "mac": {
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "identity": null,
+      "minimumSystemVersion": "12.0",
+      "target": ["dmg"]
+    },
+    "dmg": {
+      "title": "墨校台文枢 ${version}",
+      "contents": [
+        { "x": 150, "y": 180, "type": "file" },
+        { "x": 410, "y": 180, "type": "link", "path": "/Applications" }
+      ]
+    },
+    "artifactName": "Moxiao-Studio-${version}-${arch}.${ext}"
   }
 }

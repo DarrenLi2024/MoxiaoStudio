@@ -4,7 +4,7 @@ import react from "@vitejs/plugin-react";
 
 export default defineConfig({
   main: {
-    plugins: [externalizeDepsPlugin({ exclude: ["@moxiao/domain", "@moxiao/editorial", "@moxiao/storage"] })]
+    plugins: [externalizeDepsPlugin({ exclude: ["@moxiao/domain", "@moxiao/editorial", "@moxiao/storage", "@moxiao/publication"] })]
   },
   preload: {
     plugins: [externalizeDepsPlugin({ exclude: ["@moxiao/editorial", "@moxiao/storage"] })],

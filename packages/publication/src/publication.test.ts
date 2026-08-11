@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEntityId } from "@moxiao/domain";
-import { chromiumRendererCapabilities, createDefaultPublicationProfile, electronPrintOptions, preflightPublication, renderPublicationHtml, validatePdfBytes, validatePublication, type PublicationDocument, type PublicationProfile, type RendererCapabilities } from "./index";
+import { chromiumRendererCapabilities, createDefaultPublicationProfile, electronPrintOptions, preflightPublication, renderPublicationHtml, validatePdfBytes, validatePublication, validatePublicationProfile, type PublicationDocument, type PublicationProfile, type RendererCapabilities } from "./index";
 
 const profile: PublicationProfile = {
   id: createEntityId(),
@@ -106,5 +106,12 @@ describe("出版能力预检", () => {
     const result = validatePublication(document, createDefaultPublicationProfile(createEntityId()), chromiumRendererCapabilities);
     expect(result.ok).toBe(false);
     expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(["image.alt.required", "asset.rights.unresolved", "text.replacement-character"]));
+  });
+
+  it("拒绝来自渲染进程的畸形或超限出版配置", () => {
+    const valid = createDefaultPublicationProfile(createEntityId());
+    expect(validatePublicationProfile(valid)).toEqual(valid);
+    expect(() => validatePublicationProfile({ ...valid, pageSize: "A0" })).toThrow("纸张");
+    expect(() => validatePublicationProfile({ ...valid, watermark: { ...valid.watermark, content: "字".repeat(501) } })).toThrow("过长");
   });
 });

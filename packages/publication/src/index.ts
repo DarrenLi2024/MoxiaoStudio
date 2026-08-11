@@ -123,6 +123,21 @@ export function createDefaultPublicationProfile(id: EntityId, name = "雅正文�
   };
 }
 
+export function validatePublicationProfile(value: unknown): PublicationProfile {
+  if (!value || typeof value !== "object") throw new Error("出版配置不是对象");
+  const profile = structuredClone(value) as PublicationProfile;
+  if (!(["A4", "A5", "B5", "custom"] as const).includes(profile.pageSize)) throw new Error("出版纸张规格无效");
+  if (!(["horizontal-tb", "vertical-rl"] as const).includes(profile.writingMode)) throw new Error("出版书写方向无效");
+  if (!(["screen", "PDF/X-1a", "PDF/X-4", "PDF/A-2b", "PDF/UA-1"] as const).includes(profile.pdfProfile)) throw new Error("PDF 规范无效");
+  if (!profile.watermark || !profile.runningContent) throw new Error("出版配置缺少水印或页眉页脚设置");
+  if (profile.name.length > 200 || profile.watermark.content.length > 500 || profile.runningContent.headerTemplate.length > 500 || profile.runningContent.footerTemplate.length > 500) throw new Error("出版配置文本过长");
+  if (!Number.isFinite(profile.bleedMm) || profile.bleedMm < 0 || profile.bleedMm > 30) throw new Error("出版出血值无效");
+  if (!Number.isFinite(profile.watermark.opacity) || !Number.isFinite(profile.watermark.rotation)) throw new Error("水印参数无效");
+  if (profile.customPageSizeMm && profile.customPageSizeMm.some((item) => !Number.isFinite(item) || item <= 0 || item > 2_000)) throw new Error("自定义纸张尺寸无效");
+  if (profile.marginsMm && Object.values(profile.marginsMm).some((item) => !Number.isFinite(item) || item < 0 || item > 500)) throw new Error("页边距无效");
+  return profile;
+}
+
 function escapeHtml(value: string): string {
   return value.replaceAll("&", "&amp;").replaceAll("<", "&lt;").replaceAll(">", "&gt;").replaceAll('"', "&quot;").replaceAll("'", "&#39;");
 }
@@ -164,7 +179,7 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
   const sections = document.sections.map((section) => `<section class="section section-${section.role}">${section.title ? `<h1>${escapeHtml(section.title)}</h1>` : ""}${section.blocks.map(blockHtml).join("")}</section>`).join("");
   const watermarkPosition = profile.watermark.placement === "corner" ? "right:12mm;bottom:12mm" : "left:50%;top:50%;transform:translate(-50%,-50%) rotate(var(--watermark-rotation))";
   return `<!doctype html>
-<html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><title>${escapeHtml(document.title)}</title>
+<html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><title>${escapeHtml(document.title)}</title>
 <style>
 :root{--watermark-opacity:${profile.watermark.opacity};--watermark-rotation:${profile.watermark.rotation}deg}
 @page{size:${pageDimensions(profile)};margin:${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;${profile.bleedMm ? `bleed:${profile.bleedMm}mm;` : ""}${profile.cropMarks ? "marks:crop cross;" : ""}@top-center{content:${header};font:9px system-ui;color:#7d837c}@bottom-center{content:${footer};font:9px system-ui;color:#7d837c}}

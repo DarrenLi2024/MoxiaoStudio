@@ -15,6 +15,8 @@ pnpm typecheck
 pnpm test
 pnpm build
 pnpm check
+pnpm test:e2e
+pnpm dist:mac
 ```
 
 ## 工作方式
