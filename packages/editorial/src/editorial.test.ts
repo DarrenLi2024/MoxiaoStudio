@@ -8,6 +8,7 @@ import {
   findDuplicates,
   importLegacyWorkspace,
   markForDeletion,
+  matchesStarterWorkspace,
   mergeWorkspace,
   parseBatchSource
 } from "./index";
@@ -55,6 +56,27 @@ describe("XZM-EW 摄取与治理", () => {
     delete (incoming.records[0] as Partial<typeof record>).entityId;
     expect(mergeWorkspace(current, incoming).workspace.records[0]?.entityId).toBe(current.records[0]?.entityId);
     expect(() => mergeWorkspace(createWorkspace("pilot", [record]), incoming)).toThrow("范围");
+  });
+
+  it("全量备份可替换未保存的初始演示区，但不能覆盖已保存的新作", () => {
+    const demo = createWorkspace("full", [createNewRecord({ title: "演示文稿", form: "xinshi", body: "演示正文", sequence: 1 })]);
+    const restoredRecord = createNewRecord({ title: "既有作品", form: "qijue", body: "旧作正文", sequence: 8 });
+    restoredRecord.operation = "update";
+    restoredRecord.sourceHash = digest(restoredRecord.baseline);
+    const backup = createWorkspace("full", [restoredRecord]);
+
+    const restored = mergeWorkspace(demo, backup, { replaceStarterWorkspace: true });
+    expect(restored.replacedEmpty).toBe(true);
+    expect(restored.workspace.records.map((record) => record.id)).toEqual([restoredRecord.id]);
+
+    const autosavedDemo = { ...structuredClone(demo), revision: 3, savedAt: "2026-08-12T00:00:00.000Z" };
+    expect(matchesStarterWorkspace(autosavedDemo, demo)).toBe(true);
+    expect(mergeWorkspace(autosavedDemo, backup, { replaceStarterWorkspace: matchesStarterWorkspace(autosavedDemo, demo) }).workspace.records[0]?.id).toBe(restoredRecord.id);
+
+    const editedDemo = structuredClone(autosavedDemo);
+    editedDemo.records[0]!.draft.work.lines = ["用户已经修改的正文"];
+    expect(matchesStarterWorkspace(editedDemo, demo)).toBe(false);
+    expect(() => mergeWorkspace(editedDemo, backup, { replaceStarterWorkspace: matchesStarterWorkspace(editedDemo, demo) })).toThrow("不是新增记录");
   });
 
   it("新增和作者确认均受审计门禁", () => {

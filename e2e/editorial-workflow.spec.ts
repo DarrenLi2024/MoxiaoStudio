@@ -1,6 +1,7 @@
 import { expect, test, _electron as electron } from "@playwright/test";
-import { mkdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
+import { createNewRecord, createWorkspace, digest, stableStringify } from "@moxiao/editorial";
 import { validatePdfBytes } from "@moxiao/publication";
 
 const artifacts = resolve("artifacts/e2e");
@@ -18,20 +19,21 @@ test("本地工作区可新增、自动保存、筛选并查重", async () => {
     await expect(page.getByRole("heading", { name: "一卷通校" })).toBeVisible();
     await expect(page.getByText("SQLite · WAL")).toBeVisible();
 
-    const title = `端到端试作-${Date.now()}`;
+    const title = `端到端试作-${String(Date.now()).slice(-7)}`;
     await page.getByRole("button", { name: "＋ 新增作品" }).click();
     let dialog = page.getByRole("dialog", { name: "新增作品" });
     await dialog.getByLabel("作品题名").fill(title);
     await dialog.getByLabel("体裁").selectOption("xinshi");
     await dialog.getByLabel("正文").fill("第一行\n第二行");
     await dialog.getByRole("button", { name: "建立草稿" }).click();
-    await expect(page.getByText(title, { exact: true }).first()).toBeVisible();
+    const workList = page.getByRole("listbox", { name: "作品列表" });
+    await expect(workList.getByText(title, { exact: true })).toBeVisible();
 
-    await page.getByText(title, { exact: true }).first().click();
+    await workList.getByText(title, { exact: true }).click();
     await page.getByLabel("作品题名").fill(`${title}·改`);
     await expect(page.getByRole("button", { name: "所有更改已保存" })).toBeVisible({ timeout: 5_000 });
     await page.reload();
-    await page.getByText(`${title}·改`, { exact: true }).first().click();
+    await workList.getByText(`${title}·改`, { exact: true }).click();
     await expect(page.getByLabel("作品题名")).toHaveValue(`${title}·改`);
 
     await page.getByLabel("按体裁筛选").selectOption("qijue");
@@ -49,6 +51,46 @@ test("本地工作区可新增、自动保存、筛选并查重", async () => {
     await expect(page.getByRole("dialog", { name: "作品查重" })).toBeVisible();
     await expect(page.getByText(/候选 1 \/ /u)).toBeVisible();
     await page.screenshot({ path: join(artifacts, "editorial-workflow.png"), fullPage: true });
+  } finally {
+    await application.close();
+  }
+});
+
+test("首次安装的演示区自动保存后仍可恢复全量备份", async () => {
+  mkdirSync(artifacts, { recursive: true });
+  const imported = createNewRecord({ title: "备份中的既有作品", form: "qijue", body: "一行旧作，\n二行旧作。", sequence: 20 });
+  imported.operation = "update";
+  imported.sourceHash = digest(imported.baseline);
+  const backupPath = join(artifacts, `full-backup-${Date.now()}.json`);
+  writeFileSync(backupPath, `${stableStringify(createWorkspace("full", [imported]), 2)}\n`, "utf8");
+  const profile = `import-${process.pid}-${Date.now()}`;
+  const launch = () => electron.launch({
+    args: [resolve("apps/desktop/out/main/index.js")],
+    env: { ...process.env, MOXIAO_PROFILE: profile, MOXIAO_THEME: "light", MOXIAO_E2E_IMPORT_PATH: backupPath }
+  });
+
+  let application = await launch();
+  try {
+    let page = await application.firstWindow();
+    let workList = page.getByRole("listbox", { name: "作品列表" });
+    await expect(workList.getByText("春山小记", { exact: true })).toBeVisible();
+    await page.evaluate(async () => {
+      const workspace = await window.moxiao!.loadWorkspace();
+      await window.moxiao!.saveWorkspace(workspace);
+    });
+    await page.reload();
+    await expect(page.getByText("修订 1", { exact: true }).last()).toBeVisible();
+    workList = page.getByRole("listbox", { name: "作品列表" });
+    await page.getByRole("button", { name: "导入作品" }).click();
+    await expect(workList.getByText("备份中的既有作品", { exact: true })).toBeVisible();
+    await expect(workList.getByText("春山小记", { exact: true })).toHaveCount(0);
+    await application.close();
+
+    application = await launch();
+    page = await application.firstWindow();
+    workList = page.getByRole("listbox", { name: "作品列表" });
+    await expect(workList.getByText("备份中的既有作品", { exact: true })).toBeVisible();
+    await expect(page.getByText("1 篇 · 已删除 0")).toBeVisible();
   } finally {
     await application.close();
   }

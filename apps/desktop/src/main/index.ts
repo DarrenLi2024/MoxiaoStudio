@@ -11,6 +11,7 @@ import {
   findDuplicates,
   importLegacyWorkspace,
   markForDeletion,
+  matchesStarterWorkspace,
   mergeWorkspace,
   nextSequence,
   parseBatchSource,
@@ -190,15 +191,20 @@ function registerIpc(): void {
   ipcMain.handle("moxiao:workspace:list-versions", () => activeStore().listSemanticVersions(WORKSPACE_ID));
 
   ipcMain.handle("moxiao:workspace:import", async () => {
-    const selection = await dialog.showOpenDialog({
-      title: "导入墨校台审校包",
-      properties: ["openFile"],
-      filters: [{ name: "墨校台审校包", extensions: ["json"] }]
-    });
-    if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
-    if (statSync(selection.filePaths[0]).size > 50 * 1024 * 1024) throw new Error("审校包超过 50 MB 安全上限");
-    const incoming = JSON.parse(readFileSync(selection.filePaths[0], "utf8")) as unknown;
-    const result = mergeWorkspace(loadWorkspace(), incoming);
+    let filePath = process.env.MOXIAO_E2E_IMPORT_PATH;
+    if (!filePath) {
+      const selection = await dialog.showOpenDialog({
+        title: "导入墨校台审校包",
+        properties: ["openFile"],
+        filters: [{ name: "墨校台审校包", extensions: ["json"] }]
+      });
+      if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+      filePath = selection.filePaths[0];
+    }
+    if (statSync(filePath).size > 50 * 1024 * 1024) throw new Error("审校包超过 50 MB 安全上限");
+    const incoming = JSON.parse(readFileSync(filePath, "utf8")) as unknown;
+    const current = loadWorkspace();
+    const result = mergeWorkspace(current, incoming, { replaceStarterWorkspace: matchesStarterWorkspace(current, createDemoWorkspace()) });
     const workspace = saveWorkspace(result.workspace);
     return { canceled: false, ...result, workspace };
   });

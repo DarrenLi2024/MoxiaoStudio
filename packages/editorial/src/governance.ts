@@ -1,4 +1,4 @@
-import { equalValue } from "./stable";
+import { equalValue, stableStringify } from "./stable";
 import type { EditorialRecord, EditorialWorkspace } from "./types";
 import { importLegacyWorkspace, validateWorkspace } from "./workspace";
 
@@ -67,6 +67,25 @@ export interface ComparisonRow {
   status: "same" | "left-only" | "right-only";
 }
 
+function starterRecordFingerprint(record: EditorialRecord): string {
+  return stableStringify({
+    id: record.id,
+    operation: record.operation ?? "update",
+    sourceHash: record.sourceHash,
+    baseline: record.baseline,
+    draft: record.draft,
+    status: record.editorState.status
+  });
+}
+
+export function matchesStarterWorkspace(currentValue: EditorialWorkspace, starterValue: EditorialWorkspace): boolean {
+  const current = validateWorkspace(currentValue);
+  const starter = validateWorkspace(starterValue);
+  if (current.scope !== starter.scope || current.records.length !== starter.records.length || current.records.length === 0) return false;
+  const expected = new Map(starter.records.map((record) => [record.id, starterRecordFingerprint(record)]));
+  return current.records.every((record) => expected.get(record.id) === starterRecordFingerprint(record));
+}
+
 export function compareDuplicatePair(left: EditorialRecord, right: EditorialRecord): ComparisonRow[] {
   const a = bodyOf(left).split(/\n+/u).map((line) => line.trim()).filter(Boolean);
   const b = bodyOf(right).split(/\n+/u).map((line) => line.trim()).filter(Boolean);
@@ -94,7 +113,7 @@ export function compareDuplicatePair(left: EditorialRecord, right: EditorialReco
   return rows;
 }
 
-export function mergeWorkspace(currentValue: EditorialWorkspace, incomingValue: unknown): {
+export function mergeWorkspace(currentValue: EditorialWorkspace, incomingValue: unknown, options: { replaceStarterWorkspace?: boolean } = {}): {
   workspace: EditorialWorkspace;
   updated: number;
   added: number;
@@ -105,8 +124,9 @@ export function mergeWorkspace(currentValue: EditorialWorkspace, incomingValue: 
   const incoming = importLegacyWorkspace(incomingValue);
   if (incoming.scope !== current.scope) throw new Error(`审校包范围为 ${incoming.scope}，当前工作区范围为 ${current.scope}`);
   if (!incoming.records.length) throw new Error("审校包没有作品记录");
-  const replacingEmptyWorkspace = current.records.length === 0;
-  const records = structuredClone(current.records);
+  const replacingStarterWorkspace = options.replaceStarterWorkspace === true;
+  const replacingEmptyWorkspace = current.records.length === 0 || replacingStarterWorkspace;
+  const records = replacingStarterWorkspace ? [] : structuredClone(current.records);
   const indexes = new Map(records.map((record, index) => [record.id, index]));
   let updated = 0;
   let added = 0;
