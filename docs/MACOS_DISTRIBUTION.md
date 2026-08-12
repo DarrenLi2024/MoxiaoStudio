@@ -33,7 +33,7 @@ pnpm dist:mac
 MOXIAO_SIGNING_IDENTITY="证书 SHA-1" pnpm dist:mac
 ```
 
-发布脚本会验证应用签名、团队 ID、安全时间戳、应用票据、DMG 公证结果和 DMG 票据，并生成独立 SHA-256 文件。任一步失败都不得上传资产。
+发布脚本会验证应用签名、团队 ID、安全时间戳和应用票据；随后使用同一 Developer ID 对 DMG 容器签名，再把签名后的最终字节提交公证、装订票据并执行 Gatekeeper 验收，最后生成独立 SHA-256 文件。DMG 必须遵循“签名 → 公证 → 装订”顺序，任一步失败都不得上传资产。
 
 ## 成品复验
 
@@ -41,6 +41,7 @@ MOXIAO_SIGNING_IDENTITY="证书 SHA-1" pnpm dist:mac
 
 ```bash
 spctl --assess --type open --context context:primary-signature -vv "发布包.dmg"
+codesign --verify --verbose=2 "发布包.dmg"
 xcrun stapler validate "发布包.dmg"
 ```
 

@@ -5,6 +5,7 @@
 - 修复互联网下载后 Gatekeeper 报告“应用已损坏”的发行缺陷。
 - 公开包强制使用 Developer ID Application 签名、Hardened Runtime 和安全时间戳。
 - 建立应用与 DMG 双层公证、票据装订、Gatekeeper 验收和 SHA-256 清单链路。
+- 修正 DMG 容器签名顺序，确保公证票据之外还具备可供 Gatekeeper 验证的 Developer ID 签名。
 - 缺少签名或公证凭据时失败关闭，避免再次误发布临时签名包。
 
 ## 0.1.0 - 2026-08-11

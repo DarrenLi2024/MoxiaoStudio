@@ -62,6 +62,16 @@ for (const required of ["Authority=Developer ID Application:", "TeamIdentifier=3
 run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
 run("xcrun", ["stapler", "validate", appPath]);
 
+// electron-builder 会签名应用，但生成的 DMG 容器默认没有 Developer ID 签名。
+// 必须先签名 DMG，再把签名后的最终字节提交公证；否则 stapler 虽可验证，
+// Gatekeeper 仍会以 `source=no usable signature` 拒绝打开磁盘映像。
+run("codesign", ["--force", "--timestamp", "--sign", identity.sha1, dmgPath]);
+const dmgSignature = capture("codesign", ["-dvv", dmgPath]);
+for (const required of ["Authority=Developer ID Application:", "TeamIdentifier=38J989274V", "Timestamp="]) {
+  if (!dmgSignature.includes(required)) throw new Error(`DMG 签名缺少 ${required}`);
+}
+run("codesign", ["--verify", "--verbose=2", dmgPath]);
+
 const submission = capture("xcrun", ["notarytool", "submit", dmgPath, "--keychain-profile", profile, "--wait", "--output-format", "json"]);
 const result = JSON.parse(submission) as { id?: string; status?: string };
 if (result.status !== "Accepted") throw new Error(`DMG 公证未通过：${submission}`);
