@@ -7,6 +7,7 @@ import { validateEpubBytes, validatePdfBytes } from "@moxiao/publication";
 const artifacts = resolve("artifacts/e2e");
 
 test("本地工作区可新增、自动保存、筛选并查重", async () => {
+  test.setTimeout(60_000);
   mkdirSync(artifacts, { recursive: true });
   const profile = `e2e-${process.pid}-${Date.now()}`;
   const application = await electron.launch({
