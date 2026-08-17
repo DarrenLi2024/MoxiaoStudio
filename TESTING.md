@@ -9,10 +9,17 @@ pnpm build
 pnpm test:e2e
 ```
 
+EPUB 发行候选必须再使用官方 EPUBCheck 验证：
+
+```bash
+pnpm validate:epub "/绝对路径/书稿.epub"
+```
+
 `pnpm check` 必须顺序执行上述三项并返回退出码 0。
 
 桌面关键链路在构建后运行 `pnpm test:e2e`。测试使用独立临时资料库，启动真实 Electron 窗口，验证新增、编辑自动保存、重载持久化、体裁筛选和查重入口；截图保存到 `artifacts/e2e/`，不得连接用户正式资料库。
 同一套端到端测试还会打开出版中心、启用文字水印、验证分页预览、导出真实 A5 Tagged PDF，并复核文件签名、页数和结束标记。
+测试随后切换到 EPUB 3，显式关闭 EPUB 不支持的水印和页眉页脚，生成真实 `.epub` 并复核 mimetype、container、OPF、导航和章节条目；另用深色窄窗口与减弱动态效果打开笺读编辑器并保留截图。
 
 DMG 挂载后，使用包内可执行文件做冷启动冒烟测试：
 

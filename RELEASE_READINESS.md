@@ -1,5 +1,16 @@
 # 发布就绪检查
 
+## 0.2.0 编校出版一体化升级
+
+- `pnpm check` 通过：7 个测试文件、28 项单元/集成测试全部通过，类型检查和生产构建成功。
+- `pnpm test:e2e` 通过 4 条真实 Electron 链路：作品与笺读重启持久化、全量备份恢复、PDF/EPUB 成品、窄屏深色与减弱动态效果。
+- 真实生成的 EPUB 使用 EPUBCheck 5.3.0 按 EPUB 3.3 规则验证，结果为 0 fatal、0 error、0 warning；外部门禁发现并修复了空 `dc:description` 元数据错误。
+- 闲心子墨真实快照只读审计覆盖 233 篇作品、155 篇笺读、42 条校音、10 条朗读轨和 56 幅插图，语义往返通过；闲心子墨自身三项内容审计退出码为 0。
+- 0.2.0 应用公证提交 `a442aa2e-42bf-4ccc-ab75-6dfca6e48e7d` 已由 Apple 接受。
+- 0.2.0 DMG 公证提交 `7d913a59-baeb-416d-9ec7-3b4caebff12a` 已由 Apple 接受；DMG 与包内应用的票据、深层签名和 Gatekeeper 均通过。
+- 给 DMG 副本添加 `com.apple.quarantine` 后完成只读挂载，包内真实冷启动冒烟测试 1/1 通过。
+- 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.2.0-arm64.dmg`，119,286,431 字节，SHA-256：`1fca3a2e794502dd54094be63fafe9181d3ea7e1c206b00d78017d733d4d67a8`；独立清单复核为 `OK`。
+
 ## 0.1.2 全量备份恢复修复
 
 - 已复核 `XZM-EW 0.1` 清空前备份：2,347,402 字节、230 篇作品，远低于 50 MB 导入上限；文件可解析并可在临时 SQLite 中完整保存。

@@ -170,7 +170,9 @@ export function auditPayload(payload: EditorialPayload, operation: EditorialOper
   for (const [index, annotation] of (payload.reading?.annotations ?? []).entries()) {
     if (!annotation.anchor.trim()) issues.push({ level: "error", message: `第${index + 1}条笺注缺少锚点` });
     else if (!body.includes(annotation.anchor)) issues.push({ level: "error", message: `笺注锚点“${annotation.anchor}”不在正文中` });
+    if (!annotation.note.trim()) issues.push({ level: "error", message: `第${index + 1}条笺注内容为空` });
   }
+  for (const [index, note] of (payload.reading?.textualNotes ?? []).entries()) if (!note.note?.trim()) issues.push({ level: "error", message: `第${index + 1}条校勘记内容为空` });
   return issues;
 }
 

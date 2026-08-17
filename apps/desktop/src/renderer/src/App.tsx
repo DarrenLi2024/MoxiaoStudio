@@ -10,7 +10,9 @@ import {
   FileOutput,
   Filter,
   GalleryVerticalEnd,
+  GripVertical,
   History,
+  ImagePlus,
   LibraryBig,
   ListFilter,
   LoaderCircle,
@@ -24,11 +26,12 @@ import {
 } from "lucide-react";
 import type { EditorialRecord, EditorialWorkspace, ReviewStatus } from "@moxiao/editorial";
 import { ontologyVersion } from "@moxiao/ontology";
-import type { PreflightIssue, PublicationProfile } from "@moxiao/publication";
+import type { PreflightIssue, PublicationAsset, PublicationProject } from "@moxiao/publication";
 import type { DuplicateView } from "../../preload";
 
 type SaveMode = "loading" | "saved" | "dirty" | "saving" | "error" | "conflict";
 type DialogMode = "new" | "batch" | "duplicates" | "publication" | null;
+type EditorMode = "manuscript" | "reading";
 
 const railItems = [
   { label: "文库", icon: LibraryBig, active: true },
@@ -75,13 +78,15 @@ export function App() {
   const [saveMode, setSaveMode] = useState<SaveMode>("loading");
   const [saveError, setSaveError] = useState("");
   const [dialogMode, setDialogMode] = useState<DialogMode>(null);
+  const [editorMode, setEditorMode] = useState<EditorMode>("manuscript");
   const [duplicates, setDuplicates] = useState<DuplicateView[]>([]);
   const [duplicateIndex, setDuplicateIndex] = useState(0);
   const [newTitle, setNewTitle] = useState("");
   const [newForm, setNewForm] = useState("xinshi");
   const [newBody, setNewBody] = useState("");
   const [batchSource, setBatchSource] = useState("");
-  const [publicationProfile, setPublicationProfile] = useState<PublicationProfile | null>(null);
+  const [publicationProject, setPublicationProject] = useState<PublicationProject | null>(null);
+  const [publicationProjects, setPublicationProjects] = useState<PublicationProject[]>([]);
   const [publicationHtml, setPublicationHtml] = useState("");
   const [publicationIssues, setPublicationIssues] = useState<readonly PreflightIssue[]>([]);
   const [publicationBusy, setPublicationBusy] = useState(false);
@@ -186,8 +191,11 @@ export function App() {
     try {
       setPublicationBusy(true);
       setPublicationReceipt("");
-      const preview = await window.moxiao!.publicationPreview();
-      setPublicationProfile(preview.profile);
+      const projects = await window.moxiao!.publicationProjects();
+      const project = projects[0] ?? await window.moxiao!.publicationProject();
+      const preview = await window.moxiao!.publicationPreview(project);
+      setPublicationProjects(projects.length ? projects : [project]);
+      setPublicationProject(preview.project);
       setPublicationHtml(preview.html);
       setPublicationIssues(preview.preflight.issues);
       setDialogMode("publication");
@@ -200,27 +208,70 @@ export function App() {
   }
 
   useEffect(() => {
-    if (dialogMode !== "publication" || !publicationProfile) return;
+    if (dialogMode !== "publication" || !publicationProject) return;
     const timer = setTimeout(() => {
-      void window.moxiao!.publicationPreview(publicationProfile).then((preview) => {
+      void window.moxiao!.savePublicationProject(publicationProject).then((saved) => window.moxiao!.publicationPreview(saved)).then((preview) => {
         setPublicationHtml(preview.html);
         setPublicationIssues(preview.preflight.issues);
       }).catch((error: unknown) => setPublicationReceipt(error instanceof Error ? error.message : String(error)));
-    }, 260);
+    }, 420);
     return () => clearTimeout(timer);
-  }, [dialogMode, publicationProfile]);
+  }, [dialogMode, publicationProject]);
 
   async function exportPublication(): Promise<void> {
-    if (!publicationProfile) return;
+    if (!publicationProject) return;
     try {
       setPublicationBusy(true);
       setPublicationReceipt("");
-      const receipt = await window.moxiao!.exportPublication(publicationProfile);
-      if (!receipt.canceled) setPublicationReceipt(`已导出 ${receipt.validation?.pageCount ?? 0} 页 · ${Math.round((receipt.validation?.byteLength ?? 0) / 1024)} KB · ${receipt.contentHash?.slice(0, 19)}…`);
+      const receipt = await window.moxiao!.exportPublication(publicationProject);
+      if (!receipt.canceled) setPublicationReceipt(`已导出 ${receipt.validation?.pageCount ? `${receipt.validation.pageCount} 页` : `${receipt.validation?.entryCount ?? 0} 个条目`} · ${Math.round((receipt.validation?.byteLength ?? 0) / 1024)} KB · ${receipt.contentHash?.slice(0, 19)}…`);
     } catch (error) {
       setPublicationReceipt(error instanceof Error ? error.message : String(error));
     } finally {
       setPublicationBusy(false);
+    }
+  }
+
+  function updatePublication(mutator: (project: PublicationProject) => PublicationProject): void {
+    if (!publicationProject) return;
+    const next = mutator(structuredClone(publicationProject));
+    setPublicationProject(next);
+    setPublicationProjects((projects) => projects.map((project) => project.id === next.id ? next : project));
+    setPublicationReceipt("");
+  }
+
+  function movePublicationEntry(recordId: string, direction: -1 | 1): void {
+    updatePublication((project) => {
+      const ordered = [...project.entries].sort((a, b) => a.manualOrder - b.manualOrder);
+      const index = ordered.findIndex((entry) => entry.recordId === recordId);
+      const swap = index + direction;
+      if (index < 0 || swap < 0 || swap >= ordered.length) return project;
+      const currentOrder = ordered[index]!.manualOrder;
+      ordered[index] = { ...ordered[index]!, manualOrder: ordered[swap]!.manualOrder };
+      ordered[swap] = { ...ordered[swap]!, manualOrder: currentOrder };
+      return { ...project, entries: ordered };
+    });
+  }
+
+  async function addPublicationAsset(kind: PublicationAsset["kind"], attachedRecordId?: string): Promise<void> {
+    try {
+      const result = await window.moxiao!.selectPublicationAsset({ kind, ...(attachedRecordId ? { attachedRecordId } : {}) });
+      if (result.canceled || !result.asset) return;
+      updatePublication((project) => ({ ...project, assets: [...project.assets.filter((asset) => kind !== "cover" || asset.kind !== "cover"), result.asset!] }));
+    } catch (error) {
+      setPublicationReceipt(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function createPublicationProject(): Promise<void> {
+    const title = window.prompt("请输入新书稿项目名称", "新的文学选集")?.trim();
+    if (!title) return;
+    try {
+      const project = await window.moxiao!.createPublicationProject(title);
+      setPublicationProjects((projects) => [project, ...projects]);
+      setPublicationProject(project);
+    } catch (error) {
+      setPublicationReceipt(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -321,14 +372,30 @@ export function App() {
             <div className="document-kicker">{formLabels[selected.draft.work.form] ?? selected.draft.work.form} · {selected.operation === "add" ? "新增草稿" : "母本编校"}</div>
             <input className="title-editor" value={selected.draft.work.title} onChange={(event) => mutateSelected((record) => { record.draft.work.title = event.target.value; })} aria-label="作品题名" />
             <p className="document-meta">本地母本 · {chronologyOf(selected)} · 修订 {workspace.revision}</p>
-            <div className="section-rule"><span>正文</span></div>
-            <textarea className="body-editor" value={bodyOf(selected)} onChange={(event) => mutateSelected((record) => {
-              if (record.draft.work.prose != null) record.draft.work.prose = event.target.value;
-              else record.draft.work.lines = event.target.value.split("\n");
-            })} aria-label="作品正文" />
-            <aside className="composition-note"><span>创作题注</span><textarea value={selected.draft.work.compositionNote ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.work.compositionNote = event.target.value || null; })} placeholder="记录创作缘起、题记或作者自释" /></aside>
-            <div className="section-rule"><span>笺读</span></div>
-            <div className="reading-placeholder"><BookOpenText size={20} /><div><strong>{selected.draft.reading ? "笺读已经接入母本" : "尚未建立笺读"}</strong><p>{selected.draft.reading?.appreciation?.slice(0, 70) || "可在后续笺读面板编写今译、锚定笺注和赏析。"}</p></div><button>进入笺读</button></div>
+            <div className="editor-mode-switch" role="tablist" aria-label="编校内容"><button role="tab" aria-selected={editorMode === "manuscript"} className={editorMode === "manuscript" ? "is-active" : ""} onClick={() => setEditorMode("manuscript")}>正文与题注</button><button role="tab" aria-selected={editorMode === "reading"} className={editorMode === "reading" ? "is-active" : ""} onClick={() => {
+              if (!selected.draft.reading) mutateSelected((record) => { record.draft.reading = { translation: "", annotations: [], appreciation: "", textualNotes: [], editionNote: "", reviewNote: "" }; record.draft.readingSource ??= "readings.json"; });
+              setEditorMode("reading");
+            }}><BookOpenText size={14} />笺读编校</button></div>
+            {editorMode === "manuscript" ? <>
+              <div className="section-rule"><span>正文</span></div>
+              <textarea className="body-editor" value={bodyOf(selected)} onChange={(event) => mutateSelected((record) => {
+                if (record.draft.work.prose != null) record.draft.work.prose = event.target.value;
+                else record.draft.work.lines = event.target.value.split("\n");
+              })} aria-label="作品正文" />
+              <aside className="composition-note"><span>创作题注</span><textarea value={selected.draft.work.compositionNote ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.work.compositionNote = event.target.value || null; })} placeholder="记录创作缘起、题记或作者自释" /></aside>
+              <div className="section-rule"><span>笺读</span></div>
+              <div className="reading-placeholder"><BookOpenText size={20} /><div><strong>{selected.draft.reading ? "笺读已经接入母本" : "尚未建立笺读"}</strong><p>{selected.draft.reading?.appreciation?.slice(0, 70) || "可编写今译、锚定笺注、赏析、校勘记和版本说明。"}</p></div><button onClick={() => setEditorMode("reading")}>进入笺读</button></div>
+            </> : <div className="reading-editor">
+              <section className="reading-source"><header><span>正文参照</span><small>选择原文片段后，可复制到笺注锚点</small></header><pre>{bodyOf(selected)}</pre></section>
+              <section className="reading-field"><label htmlFor="reading-translation">今译</label><textarea id="reading-translation" value={selected.draft.reading?.translation ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.reading ??= {}; record.draft.reading.translation = event.target.value; })} placeholder="用当代汉语疏通文意；没有必要时可以留空。" /></section>
+              <section className="reading-field annotations-editor"><header><div><strong>锚定笺注</strong><small>锚点必须是正文中实际存在的词句</small></div><button onClick={() => mutateSelected((record) => { record.draft.reading ??= {}; record.draft.reading.annotations ??= []; record.draft.reading.annotations.push({ id: crypto.randomUUID(), anchor: record.draft.work.lines.find((line) => line.trim())?.trim() || record.draft.work.prose?.split("\n").find((line) => line.trim())?.trim() || "", note: "", source: "" }); })}>＋ 添加笺注</button></header>
+                {(selected.draft.reading?.annotations ?? []).map((annotation, index) => <div className="annotation-editor-row" key={annotation.id ?? `${annotation.anchor}-${index}`}><GripVertical size={15} aria-hidden="true" /><label>原文锚点<input aria-label={`第${index + 1}条笺注锚点`} value={annotation.anchor} onChange={(event) => mutateSelected((record) => { record.draft.reading!.annotations![index]!.anchor = event.target.value; })} /></label><label>笺注<textarea aria-label={`第${index + 1}条笺注内容`} value={annotation.note} onChange={(event) => mutateSelected((record) => { record.draft.reading!.annotations![index]!.note = event.target.value; })} /></label><label>出处<input aria-label={`第${index + 1}条笺注出处`} value={annotation.source ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.reading!.annotations![index]!.source = event.target.value || null; })} /></label><button className="remove-reading-item" aria-label={`删除第${index + 1}条笺注`} onClick={() => mutateSelected((record) => { record.draft.reading!.annotations!.splice(index, 1); })}>删除</button></div>)}
+                {!(selected.draft.reading?.annotations?.length) && <p className="reading-empty">尚无逐词笺注。可直接完成今译与赏析，也可以按需建立原文锚点。</p>}
+              </section>
+              <section className="reading-field"><label htmlFor="reading-appreciation">赏析</label><textarea id="reading-appreciation" className="reading-long" value={selected.draft.reading?.appreciation ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.reading ??= {}; record.draft.reading.appreciation = event.target.value; })} placeholder="结合语境、章法、意象、典故和作者创作意图展开赏析。" /></section>
+              <section className="reading-field textual-notes"><header><div><strong>校勘记</strong><small>记录异文、误读修正和考据依据</small></div><button onClick={() => mutateSelected((record) => { record.draft.reading ??= {}; record.draft.reading.textualNotes ??= []; record.draft.reading.textualNotes.push({ id: crypto.randomUUID(), title: "校勘记", note: "", source: "" }); })}>＋ 添加校勘记</button></header>{(selected.draft.reading?.textualNotes ?? []).map((note, index) => <div className="textual-note-row" key={note.id ?? index}><input aria-label={`第${index + 1}条校勘记题名`} value={note.title ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.reading!.textualNotes![index]!.title = event.target.value; })} /><textarea aria-label={`第${index + 1}条校勘记内容`} value={note.note} onChange={(event) => mutateSelected((record) => { record.draft.reading!.textualNotes![index]!.note = event.target.value; })} /><button className="remove-reading-item" onClick={() => mutateSelected((record) => { record.draft.reading!.textualNotes!.splice(index, 1); })}>删除</button></div>)}</section>
+              <div className="reading-two-column"><section className="reading-field"><label htmlFor="edition-note">版本说明</label><textarea id="edition-note" value={selected.draft.reading?.editionNote ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.reading ??= {}; record.draft.reading.editionNote = event.target.value; })} /></section><section className="reading-field"><label htmlFor="review-note">审校说明</label><textarea id="review-note" value={selected.draft.reading?.reviewNote ?? ""} onChange={(event) => mutateSelected((record) => { record.draft.reading ??= {}; record.draft.reading.reviewNote = event.target.value; })} /></section></div>
+            </div>}
           </article> : <div className="empty-workspace"><LibraryBig size={34} /><h2>工作区没有文稿</h2><p>可导入 XZM-EW 审校包，或新增第一篇作品。</p><button className="primary-button" onClick={() => setDialogMode("new")}>新增作品</button></div>}
         </div>
       </section>
@@ -373,17 +440,20 @@ export function App() {
               <footer><button className="quiet-button" onClick={() => void resolveDuplicate(null)}>两篇均保留</button><button className="danger-button" onClick={() => void resolveDuplicate(currentDuplicate.right.id)}>保留左篇，删除右篇</button><button className="danger-button" onClick={() => void resolveDuplicate(currentDuplicate.left.id)}>删除左篇，保留右篇</button></footer>
             </>}
           </div>}
-          {dialogMode === "publication" && publicationProfile && <div className="publication-content">
+          {dialogMode === "publication" && publicationProject && <div className="publication-content">
             <aside className="publication-controls">
-              <label>纸张<select value={publicationProfile.pageSize} onChange={(event) => setPublicationProfile({ ...publicationProfile, pageSize: event.target.value as PublicationProfile["pageSize"] })}><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option></select></label>
-              <fieldset><legend>页眉页脚</legend><label className="switch-label"><input type="checkbox" checked={publicationProfile.runningContent.enabled} onChange={(event) => setPublicationProfile({ ...publicationProfile, runningContent: { ...publicationProfile.runningContent, enabled: event.target.checked } })} />启用</label><label>页眉<input value={publicationProfile.runningContent.headerTemplate} onChange={(event) => setPublicationProfile({ ...publicationProfile, runningContent: { ...publicationProfile.runningContent, headerTemplate: event.target.value } })} /></label><label>页脚<input value={publicationProfile.runningContent.footerTemplate} onChange={(event) => setPublicationProfile({ ...publicationProfile, runningContent: { ...publicationProfile.runningContent, footerTemplate: event.target.value } })} /></label></fieldset>
-              <fieldset><legend>水印</legend><label className="switch-label"><input type="checkbox" checked={publicationProfile.watermark.enabled} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, enabled: event.target.checked } })} />启用</label><label>文字<input value={publicationProfile.watermark.content} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, content: event.target.value } })} /></label><label>位置<select value={publicationProfile.watermark.placement} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, placement: event.target.value as PublicationProfile["watermark"]["placement"] } })}><option value="center">居中</option><option value="corner">页角</option><option value="tile">平铺</option></select></label><label>透明度<input type="range" min="0.03" max="0.35" step="0.01" value={publicationProfile.watermark.opacity} onChange={(event) => setPublicationProfile({ ...publicationProfile, watermark: { ...publicationProfile.watermark, opacity: Number(event.target.value) } })} /></label></fieldset>
-              <label>PDF 规范<select value={publicationProfile.pdfProfile} onChange={(event) => setPublicationProfile({ ...publicationProfile, pdfProfile: event.target.value as PublicationProfile["pdfProfile"] })}><option value="screen">通用屏幕 PDF</option><option value="PDF/X-4">PDF/X-4 印刷</option><option value="PDF/A-2b">PDF/A-2b 归档</option><option value="PDF/UA-1">PDF/UA-1 无障碍</option></select></label>
+              <fieldset><legend>书稿项目</legend><label>当前项目<select aria-label="当前出版项目" value={publicationProject.id} onChange={(event) => { const project = publicationProjects.find((item) => item.id === event.target.value); if (project) setPublicationProject(project); }}>{publicationProjects.map((project) => <option value={project.id} key={project.id}>{project.title}</option>)}</select></label><button className="asset-button" onClick={() => void createPublicationProject()}>＋ 新建另一部书稿</button><label>书名<input value={publicationProject.title} onChange={(event) => updatePublication((project) => ({ ...project, title: event.target.value }))} /></label><label>副题<input value={publicationProject.subtitle} onChange={(event) => updatePublication((project) => ({ ...project, subtitle: event.target.value }))} /></label><label>作者<input value={publicationProject.creator} onChange={(event) => updatePublication((project) => ({ ...project, creator: event.target.value }))} /></label><label>简介<textarea value={publicationProject.description} onChange={(event) => updatePublication((project) => ({ ...project, description: event.target.value }))} /></label></fieldset>
+              <fieldset><legend>编选与排序</legend><label>体裁<select aria-label="出版按体裁筛选" value={publicationProject.genreFilter} onChange={(event) => updatePublication((project) => ({ ...project, genreFilter: event.target.value }))}><option value="all">全部体裁</option>{[...formCounts.keys()].map((form) => <option value={form} key={form}>{formLabels[form] ?? form}</option>)}</select></label><label>系年<select aria-label="出版按系年筛选" value={publicationProject.chronologyFilter} onChange={(event) => updatePublication((project) => ({ ...project, chronologyFilter: event.target.value as PublicationProject["chronologyFilter"] }))}><option value="all">全部系年</option><option value="dated">已有系年</option><option value="undated">尚未系年</option></select></label><label>顺序<select aria-label="出版排序方式" value={publicationProject.sortMode} onChange={(event) => updatePublication((project) => ({ ...project, sortMode: event.target.value as PublicationProject["sortMode"] }))}><option value="author-intent">作者编定</option><option value="chronology-asc">纪年由早到晚</option><option value="chronology-desc">纪年由晚到早</option><option value="genre">按体裁</option></select></label><div className="publication-selection-list">{[...publicationProject.entries].sort((a, b) => a.manualOrder - b.manualOrder).map((entry, index) => { const record = records.find((item) => item.id === entry.recordId); if (!record) return null; return <div className="publication-entry" key={entry.recordId}><input aria-label={`收录${titleOf(record)}`} type="checkbox" checked={entry.included} onChange={(event) => updatePublication((project) => ({ ...project, entries: project.entries.map((item) => item.recordId === entry.recordId ? { ...item, included: event.target.checked } : item) }))} /><span><strong>{titleOf(record)}</strong><small>{formLabels[record.draft.work.form] ?? record.draft.work.form} · {chronologyOf(record)}</small></span><div><button aria-label={`上移${titleOf(record)}`} disabled={index === 0} onClick={() => movePublicationEntry(entry.recordId, -1)}>↑</button><button aria-label={`下移${titleOf(record)}`} disabled={index === publicationProject.entries.length - 1} onClick={() => movePublicationEntry(entry.recordId, 1)}>↓</button></div></div>; })}</div></fieldset>
+              <fieldset><legend>封面与插图</legend><button className="asset-button" onClick={() => void addPublicationAsset("cover")}><ImagePlus size={14} />{publicationProject.assets.some((asset) => asset.kind === "cover") ? "更换封面" : "选择自定义封面"}</button>{publicationProject.assets.filter((asset) => asset.kind === "cover").map((asset) => <div className="asset-editor" key={asset.id}>{asset.dataUri && <img src={asset.dataUri} alt="封面预览" />}<label>替代文字<input value={asset.alt} onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, alt: event.target.value } : item) }))} /></label><label>使用权<select value={asset.rights} onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, rights: event.target.value as PublicationAsset["rights"] } : item) }))}><option value="unknown">待确认</option><option value="owned">作者自有</option><option value="licensed">已获授权</option><option value="public-domain">公版</option></select></label></div>)}<button className="asset-button" disabled={!selected} onClick={() => selected && void addPublicationAsset("illustration", selected.id)}><ImagePlus size={14} />为当前作品添加插图</button>{publicationProject.assets.filter((asset) => asset.kind === "illustration").map((asset) => <div className="asset-editor asset-editor-row" key={asset.id}><span>{asset.fileName}</span><input aria-label={`${asset.fileName}替代文字`} placeholder="替代文字" value={asset.alt} onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, alt: event.target.value } : item) }))} /><select aria-label={`${asset.fileName}使用权`} value={asset.rights} onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, rights: event.target.value as PublicationAsset["rights"] } : item) }))}><option value="unknown">权利待确认</option><option value="owned">作者自有</option><option value="licensed">已获授权</option><option value="public-domain">公版</option></select><button onClick={() => updatePublication((project) => ({ ...project, assets: project.assets.filter((item) => item.id !== asset.id) }))}>移除</button></div>)}</fieldset>
+              <fieldset><legend>字体与装饰</legend><label>版式主题<select value={publicationProject.theme.id} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, id: event.target.value as PublicationProject["theme"]["id"] } }))}><option value="elegant">雅正文稿</option><option value="plain">朴素校样</option><option value="modern">现代选集</option></select></label><label>正文字体<select value={publicationProject.theme.bodyFont} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, bodyFont: event.target.value } }))}><option value={'"Songti SC", "STSong", serif'}>宋体</option><option value={'"Kaiti SC", "STKaiti", serif'}>楷体</option><option value={'"PingFang SC", sans-serif'}>苹方</option><option value={'"Noto Serif CJK SC", serif'}>思源宋体</option>{publicationProject.assets.filter((asset) => asset.kind === "font").map((asset) => <option key={asset.id} value={`"${asset.fontFamily}"`}>{asset.fontFamily}</option>)}</select></label><label>标题字体<select value={publicationProject.theme.headingFont} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, headingFont: event.target.value } }))}><option value={'"Songti SC", "STSong", serif'}>宋体</option><option value={'"Kaiti SC", "STKaiti", serif'}>楷体</option><option value={'"PingFang SC", sans-serif'}>苹方</option>{publicationProject.assets.filter((asset) => asset.kind === "font").map((asset) => <option key={asset.id} value={`"${asset.fontFamily}"`}>{asset.fontFamily}</option>)}</select></label><button className="asset-button" onClick={() => void addPublicationAsset("font")}><Upload size={14} />导入授权字体</button>{publicationProject.assets.filter((asset) => asset.kind === "font").map((asset) => <div className="asset-editor asset-editor-row" key={asset.id}><span>{asset.fontFamily}</span><select aria-label={`${asset.fontFamily}使用权`} value={asset.rights} onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, rights: event.target.value as PublicationAsset["rights"] } : item) }))}><option value="unknown">授权待确认</option><option value="owned">自有字体</option><option value="licensed">已获嵌入授权</option><option value="public-domain">开放许可</option></select><button onClick={() => updatePublication((project) => ({ ...project, assets: project.assets.filter((item) => item.id !== asset.id), theme: { ...project.theme, bodyFont: project.theme.bodyFont.includes(asset.fontFamily ?? "§") ? '"Songti SC", "STSong", serif' : project.theme.bodyFont, headingFont: project.theme.headingFont.includes(asset.fontFamily ?? "§") ? '"Songti SC", "STSong", serif' : project.theme.headingFont } }))}>移除</button></div>)}<label className="switch-label"><input type="checkbox" checked={publicationProject.profile.requireEmbeddedFonts} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, requireEmbeddedFonts: event.target.checked } }))} />要求成品嵌入字体</label><label>正文字号<input type="number" min="7" max="36" step="0.5" value={publicationProject.theme.baseFontPt} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, baseFontPt: Number(event.target.value) } }))} /></label><label>行距<input type="number" min="1" max="3" step="0.05" value={publicationProject.theme.lineHeight} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, lineHeight: Number(event.target.value) } }))} /></label><label>章饰<select value={publicationProject.theme.ornament} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, ornament: event.target.value as PublicationProject["theme"]["ornament"] } }))}><option value="none">无</option><option value="bamboo">竹叶雅饰</option><option value="cloud">云纹</option><option value="rule">几何分隔</option></select></label><label>主题色<input type="color" value={publicationProject.theme.accentColor} onChange={(event) => updatePublication((project) => ({ ...project, theme: { ...project.theme, accentColor: event.target.value } }))} /></label></fieldset>
+              <fieldset><legend>纸张与页眉</legend><label>纸张<select value={publicationProject.profile.pageSize} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, pageSize: event.target.value as PublicationProject["profile"]["pageSize"] } }))}><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option></select></label><label className="switch-label"><input type="checkbox" checked={publicationProject.profile.runningContent.enabled} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, runningContent: { ...project.profile.runningContent, enabled: event.target.checked } } }))} />启用页眉页脚</label><label>页眉<input value={publicationProject.profile.runningContent.headerTemplate} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, runningContent: { ...project.profile.runningContent, headerTemplate: event.target.value } } }))} /></label><label>页脚<input value={publicationProject.profile.runningContent.footerTemplate} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, runningContent: { ...project.profile.runningContent, footerTemplate: event.target.value } } }))} /></label></fieldset>
+              <fieldset><legend>水印</legend><label className="switch-label"><input type="checkbox" checked={publicationProject.profile.watermark.enabled} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, watermark: { ...project.profile.watermark, enabled: event.target.checked } } }))} />启用</label><label>文字<input value={publicationProject.profile.watermark.content} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, watermark: { ...project.profile.watermark, content: event.target.value } } }))} /></label></fieldset>
+              <fieldset><legend>交付目标</legend><label>格式<select aria-label="目标客户端" value={publicationProject.target} onChange={(event) => updatePublication((project) => ({ ...project, target: event.target.value as PublicationProject["target"] }))}><option value="pdf">通用屏幕 PDF</option><option value="epub">EPUB 3 可重排电子书</option><option value="xianxinzimo">闲心子墨暂存内容包</option><option value="webpub">通用 WebPub 内容包</option></select></label>{publicationProject.target === "pdf" && <label>PDF 规范<select value={publicationProject.profile.pdfProfile} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, pdfProfile: event.target.value as PublicationProject["profile"]["pdfProfile"] } }))}><option value="screen">通用屏幕 PDF</option><option value="PDF/X-4">PDF/X-4 印刷</option><option value="PDF/A-2b">PDF/A-2b 归档</option><option value="PDF/UA-1">PDF/UA-1 无障碍</option></select></label>}</fieldset>
               <div className={`preflight-card ${publicationIssues.some((issue) => issue.severity === "error") ? "has-errors" : "is-ready"}`}><strong>{publicationIssues.length ? `预检发现 ${publicationIssues.length} 项` : "预检通过，可安全导出"}</strong>{publicationIssues.map((issue) => <p key={issue.code}>{issue.message}</p>)}</div>
-              <button className="primary-button export-pdf-button" disabled={publicationBusy || publicationIssues.some((issue) => issue.severity === "error")} onClick={() => void exportPublication()}>{publicationBusy ? <LoaderCircle size={15} className="spin" /> : <FileOutput size={15} />} 导出并验证 PDF</button>
+              <button className="primary-button export-pdf-button" disabled={publicationBusy || publicationIssues.some((issue) => issue.severity === "error")} onClick={() => void exportPublication()}>{publicationBusy ? <LoaderCircle size={15} className="spin" /> : publicationProject.target === "epub" ? <BookOpenText size={15} /> : <FileOutput size={15} />} 导出并验证{{ pdf: " PDF", epub: " EPUB", xianxinzimo: "闲心子墨包", webpub: " WebPub 包" }[publicationProject.target]}</button>
               {publicationReceipt && <p className="publication-receipt">{publicationReceipt}</p>}
             </aside>
-            <div className="publication-preview"><div className="preview-toolbar"><span>分页预览</span><span>{publicationProfile.pageSize} · {publicationProfile.pdfProfile}</span></div><iframe title="出版分页预览" sandbox="" srcDoc={publicationHtml} /></div>
+            <div className="publication-preview"><div className="preview-toolbar"><span>统一出版快照预览</span><span>{publicationProject.profile.pageSize} · {publicationProject.target.toLocaleUpperCase()}</span></div><iframe title="出版分页预览" sandbox="" srcDoc={publicationHtml} /></div>
           </div>}
         </section>
       </div>}

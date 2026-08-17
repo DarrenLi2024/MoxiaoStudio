@@ -8,6 +8,8 @@ export interface PublicationDocument {
   readonly expressionHash: ContentHash;
   readonly title: string;
   readonly language: string;
+  readonly creator?: string;
+  readonly description?: string;
   readonly sections: readonly PublicationSection[];
 }
 
@@ -61,6 +63,12 @@ export interface PublicationProfile {
   readonly pdfProfile: PdfProfile;
   readonly requireEmbeddedFonts: boolean;
   readonly requireGlyphCoverage: boolean;
+  readonly bodyFont?: string;
+  readonly headingFont?: string;
+  readonly baseFontPt?: number;
+  readonly lineHeight?: number;
+  readonly accentColor?: string;
+  readonly ornament?: "none" | "bamboo" | "cloud" | "rule";
 }
 
 export interface PdfValidationResult {
@@ -87,6 +95,44 @@ export const chromiumRendererCapabilities: RendererCapabilities = {
   cmyk: false,
   pdfProfiles: ["screen"],
   taggedPdf: true
+};
+
+export const epubRendererCapabilities: RendererCapabilities = {
+  adapterId: "epub-3",
+  adapterVersion: "1.0.0",
+  watermark: false,
+  imageWatermark: false,
+  watermarkLayers: false,
+  runningHeaders: false,
+  differentOddEven: false,
+  pageCounters: false,
+  verticalText: true,
+  footnotes: true,
+  bleedAndMarks: false,
+  fontEmbedding: true,
+  glyphPreflight: false,
+  cmyk: false,
+  pdfProfiles: ["screen"],
+  taggedPdf: false
+};
+
+export const contentPackageRendererCapabilities: RendererCapabilities = {
+  adapterId: "structured-content-package",
+  adapterVersion: "1.0.0",
+  watermark: false,
+  imageWatermark: false,
+  watermarkLayers: false,
+  runningHeaders: false,
+  differentOddEven: false,
+  pageCounters: false,
+  verticalText: true,
+  footnotes: true,
+  bleedAndMarks: false,
+  fontEmbedding: false,
+  glyphPreflight: false,
+  cmyk: false,
+  pdfProfiles: ["screen"],
+  taggedPdf: false
 };
 
 export function createDefaultPublicationProfile(id: EntityId, name = "雅正文稿 PDF"): PublicationProfile {
@@ -119,7 +165,13 @@ export function createDefaultPublicationProfile(id: EntityId, name = "雅正文�
     },
     pdfProfile: "screen",
     requireEmbeddedFonts: true,
-    requireGlyphCoverage: false
+    requireGlyphCoverage: false,
+    bodyFont: '"Songti SC", "STSong", "Noto Serif CJK SC", serif',
+    headingFont: '"Songti SC", "STSong", "Noto Serif CJK SC", serif',
+    baseFontPt: 11.5,
+    lineHeight: 1.9,
+    accentColor: "#315f4d",
+    ornament: "bamboo"
   };
 }
 
@@ -135,6 +187,8 @@ export function validatePublicationProfile(value: unknown): PublicationProfile {
   if (!Number.isFinite(profile.watermark.opacity) || !Number.isFinite(profile.watermark.rotation)) throw new Error("水印参数无效");
   if (profile.customPageSizeMm && profile.customPageSizeMm.some((item) => !Number.isFinite(item) || item <= 0 || item > 2_000)) throw new Error("自定义纸张尺寸无效");
   if (profile.marginsMm && Object.values(profile.marginsMm).some((item) => !Number.isFinite(item) || item < 0 || item > 500)) throw new Error("页边距无效");
+  if (profile.baseFontPt !== undefined && (!Number.isFinite(profile.baseFontPt) || profile.baseFontPt < 7 || profile.baseFontPt > 36)) throw new Error("正文字号无效");
+  if (profile.lineHeight !== undefined && (!Number.isFinite(profile.lineHeight) || profile.lineHeight < 1 || profile.lineHeight > 3)) throw new Error("正文行距无效");
   return profile;
 }
 
@@ -161,30 +215,34 @@ function pageDimensions(profile: PublicationProfile): string {
   return `${width}mm ${height}mm`;
 }
 
-function blockHtml(block: PublicationBlock): string {
+function blockHtml(block: PublicationBlock, assets: ReadonlyMap<string, PublicationAssetDeclaration>): string {
   if (block.type === "heading") return `<h${block.level}>${escapeHtml(block.text)}</h${block.level}>`;
   if (block.type === "paragraph") return `<p>${escapeHtml(block.text).replaceAll("\n", "<br>")}</p>`;
   if (block.type === "verse") return `<div class="verse">${block.lines.map((line) => `<p>${escapeHtml(line) || "&nbsp;"}</p>`).join("")}</div>`;
   if (block.type === "annotation") return `<aside class="annotation"><b>${escapeHtml(block.marker)}</b>${escapeHtml(block.text)}</aside>`;
-  return `<figure data-asset-id="${block.assetId}"><div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
+  const asset = assets.get(block.assetId);
+  return `<figure data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
 }
 
-export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile): string {
+export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile, assetList: readonly PublicationAssetDeclaration[] = []): string {
   const margins = profile.marginsMm ?? { top: 22, right: 19, bottom: 22, left: 19 };
   const watermark = profile.watermark.enabled && profile.watermark.kind === "text"
     ? `<div class="watermark watermark-${profile.watermark.placement}">${escapeHtml(profile.watermark.content)}</div>`
     : "";
   const header = profile.runningContent.enabled ? runningTemplateCss(profile.runningContent.headerTemplate, document.title) : "none";
   const footer = profile.runningContent.enabled ? runningTemplateCss(profile.runningContent.footerTemplate, document.title) : "none";
-  const sections = document.sections.map((section) => `<section class="section section-${section.role}">${section.title ? `<h1>${escapeHtml(section.title)}</h1>` : ""}${section.blocks.map(blockHtml).join("")}</section>`).join("");
+  const assets = new Map(assetList.map((asset) => [asset.id, asset]));
+  const fontFaces = assetList.filter((asset) => asset.kind === "font" && asset.dataUri && asset.fontFamily).map((asset) => `@font-face{font-family:"${cssText(asset.fontFamily!)}";src:url("${cssText(asset.dataUri!)}") format("${asset.mediaType.includes("woff2") ? "woff2" : asset.mediaType.includes("woff") ? "woff" : asset.mediaType.includes("otf") ? "opentype" : "truetype"}");font-display:block}`).join("");
+  const sections = document.sections.map((section) => `<section class="section section-${section.role}">${section.title ? `<h1>${escapeHtml(section.title)}</h1>` : ""}${profile.ornament && profile.ornament !== "none" ? `<div class="ornament ornament-${profile.ornament}" aria-hidden="true">${profile.ornament === "cloud" ? "☁" : profile.ornament === "bamboo" ? "❦" : "◇"}</div>` : ""}${section.blocks.map((block) => blockHtml(block, assets)).join("")}</section>`).join("");
   const watermarkPosition = profile.watermark.placement === "corner" ? "right:12mm;bottom:12mm" : "left:50%;top:50%;transform:translate(-50%,-50%) rotate(var(--watermark-rotation))";
   return `<!doctype html>
-<html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:;"><title>${escapeHtml(document.title)}</title>
+<html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;"><title>${escapeHtml(document.title)}</title>
 <style>
+${fontFaces}
 :root{--watermark-opacity:${profile.watermark.opacity};--watermark-rotation:${profile.watermark.rotation}deg}
 @page{size:${pageDimensions(profile)};margin:${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;${profile.bleedMm ? `bleed:${profile.bleedMm}mm;` : ""}${profile.cropMarks ? "marks:crop cross;" : ""}@top-center{content:${header};font:9px system-ui;color:#7d837c}@bottom-center{content:${footer};font:9px system-ui;color:#7d837c}}
 @page:first{@top-center{content:${profile.runningContent.suppressOnFirstPage ? "none" : header}}}
-*{box-sizing:border-box}body{margin:0;color:#20241f;background:#fffef9;font-family:"Songti SC","STSong","Noto Serif CJK SC",serif;writing-mode:${profile.writingMode};font-size:11.5pt;line-height:1.9}.section{break-after:page}.section:last-child{break-after:auto}h1,h2,h3{break-after:avoid;font-weight:600;letter-spacing:.08em}h1{font-size:24pt;margin:0 0 18mm;text-align:center}h2{font-size:18pt}h3{font-size:14pt}p{margin:0 0 4mm}.verse{margin:8mm 0;text-align:center;font-size:13pt;line-height:2}.verse p{margin:0}.annotation{margin:5mm 0;padding:4mm;border-left:1.5px solid #759486;background:#f5f7f3;color:#505851}.annotation b{margin-right:2mm;color:#315f4d}.watermark{position:fixed;z-index:${profile.watermark.layer === "under-content" ? "-1" : "20"};${watermarkPosition};opacity:var(--watermark-opacity);color:#315f4d;font:600 25pt system-ui;white-space:nowrap;pointer-events:none}.watermark-tile{inset:0;transform:none;display:grid;place-items:center;background-image:repeating-linear-gradient(-28deg,transparent 0 46mm,rgba(49,95,77,.04) 46mm 48mm)}figure{text-align:center}.missing-image{display:grid;min-height:45mm;place-items:center;border:1px solid #dfe3dc;color:#969d96}figcaption{margin-top:2mm;font-size:9pt;color:#70776f}
+*{box-sizing:border-box}body{margin:0;color:#20241f;background:#fffef9;font-family:${profile.bodyFont ?? '"Songti SC","STSong","Noto Serif CJK SC",serif'};writing-mode:${profile.writingMode};font-size:${profile.baseFontPt ?? 11.5}pt;line-height:${profile.lineHeight ?? 1.9}}.section{break-after:page}.section:last-child{break-after:auto}h1,h2,h3{break-after:avoid;font-family:${profile.headingFont ?? profile.bodyFont ?? '"Songti SC","STSong",serif'};font-weight:600;letter-spacing:.08em;color:${profile.accentColor ?? "#315f4d"}}h1{font-size:24pt;margin:0 0 6mm;text-align:center}.ornament{text-align:center;margin:0 0 12mm;color:${profile.accentColor ?? "#315f4d"};opacity:.66}.ornament-rule{font-size:10pt;letter-spacing:.5em}.ornament-cloud,.ornament-bamboo{font-size:14pt}h2{font-size:18pt}h3{font-size:14pt}p{margin:0 0 4mm}.verse{margin:8mm 0;text-align:center;font-size:13pt;line-height:2}.verse p{margin:0}.annotation{margin:5mm 0;padding:4mm;border-left:1.5px solid ${profile.accentColor ?? "#759486"};background:#f5f7f3;color:#505851}.annotation b{margin-right:2mm;color:${profile.accentColor ?? "#315f4d"}}.watermark{position:fixed;z-index:${profile.watermark.layer === "under-content" ? "-1" : "20"};${watermarkPosition};opacity:var(--watermark-opacity);color:#315f4d;font:600 25pt system-ui;white-space:nowrap;pointer-events:none}.watermark-tile{inset:0;transform:none;display:grid;place-items:center;background-image:repeating-linear-gradient(-28deg,transparent 0 46mm,rgba(49,95,77,.04) 46mm 48mm)}figure{text-align:center;break-inside:avoid}figure img{max-width:100%;max-height:170mm;object-fit:contain}.missing-image{display:grid;min-height:45mm;place-items:center;border:1px solid #dfe3dc;color:#969d96}figcaption{margin-top:2mm;font-size:9pt;color:#70776f}
 </style></head><body>${watermark}<main>${sections}</main></body></html>`;
 }
 
@@ -226,7 +284,14 @@ export interface PublicationAssetDeclaration {
   readonly mediaType: string;
   readonly rights: "owned" | "licensed" | "public-domain" | "unknown";
   readonly source?: string;
+  readonly kind?: "cover" | "illustration" | "font" | "ornament";
+  readonly fileName?: string;
+  readonly dataUri?: string;
+  readonly fontFamily?: string;
 }
+
+export * from "./project";
+export * from "./epub";
 
 export interface RendererCapabilities {
   readonly adapterId: string;
@@ -268,6 +333,7 @@ export function validatePublication(
   if (!document.title.trim()) issues.push({ severity: "error", code: "document.title.required", message: "出版文档缺少书名" });
   if (!document.sections.length) issues.push({ severity: "error", code: "document.sections.empty", message: "出版文档没有可输出篇章" });
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
+  for (const asset of assets) if (asset.rights === "unknown") issues.push({ severity: "error", code: "asset.rights.unresolved", message: `${asset.fileName ?? asset.id} 尚未确认使用权` });
   for (const section of document.sections) {
     if (!section.blocks.length) issues.push({ severity: "warning", code: "section.blocks.empty", message: `${section.title ?? section.id} 没有正文块` });
     for (const block of section.blocks) {
@@ -276,7 +342,7 @@ export function validatePublication(
       if (block.type !== "image") continue;
       if (!block.alt.trim()) issues.push({ severity: "error", code: "image.alt.required", message: `${section.title ?? section.id} 的插图缺少替代文字` });
       const asset = assetsById.get(block.assetId);
-      if (!asset || asset.rights === "unknown") issues.push({ severity: "error", code: "asset.rights.unresolved", message: `${section.title ?? section.id} 的插图尚未确认使用权` });
+      if (!asset) issues.push({ severity: "error", code: "asset.rights.unresolved", message: `${section.title ?? section.id} 的插图尚未登记` });
     }
   }
   return { ok: issues.every((issue) => issue.severity !== "error"), issues };

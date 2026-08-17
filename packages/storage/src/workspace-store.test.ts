@@ -65,4 +65,15 @@ describe("SQLite 工作区仓储", () => {
     expect(database.tombstoneCount("main")).toBe(1);
     database.close();
   });
+
+  it("出版项目独立于活母本保存", () => {
+    const database = store().store;
+    database.initializeWorkspace("main", createWorkspace("full"));
+    const project = { id: "project-main", title: "自选集", entries: [] };
+    database.savePublicationProject("main", project.id, project, "2026-08-17T12:00:00.000Z");
+    expect(database.loadPublicationProject("main", project.id)).toEqual(project);
+    expect(database.listPublicationProjects("main")).toEqual([project]);
+    expect(database.loadWorkspace("main")?.records).toEqual([]);
+    database.close();
+  });
 });

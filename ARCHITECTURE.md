@@ -41,9 +41,13 @@ SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义�
 
 所有导出先生成与界面无关的 `PublicationDocument`，再应用 `PublicationProfile`。每个渲染适配器声明 `RendererCapabilities`；预检不通过时不得静默导出。
 
+`PublicationProject` 位于活母本与 `PublicationDocument` 之间，独立保存书名、篇目收录、作者编定顺序、体裁/系年筛选、封面、插图、字体和主题。出版项目不得改写作品 `seq`；多部书稿可以引用同一作品表达。生成成品时锁定项目、母本修订和表达哈希，形成新的 `Manifestation`。
+
 默认开源渲染路径计划使用 Vivliostyle；专业印刷可选接入受许可的 Prince 或出版社指定引擎。PDF、EPUB、DOCX、Web 和闲心子墨内容包均消费同一 Publication IR。
 
 桌面端首个内置适配器使用 Electron Chromium 生成通用 Tagged PDF，实际支持文字水印、页眉页脚、页码、A4/A5/B5 和自定义尺寸。PDF/X、PDF/A、PDF/UA、CMYK、出血裁切和左右页镜像边距只有在适配器明确声明能力时才能启用；内置适配器不会虚报。详细边界见 [docs/PUBLICATION.md](docs/PUBLICATION.md)。
+
+内置 EPUB 3 适配器生成可重排电子书，包含 OPF、导航、XHTML 章节、CSS 和经权利确认的图片/字体。EPUB 不支持页眉页脚和水印，请求这些能力时预检阻止导出。闲心子墨和 WebPub 先输出结构化暂存包，保留快照哈希与能力声明，不直接覆盖目标客户端。
 
 闲心子墨适配器按文件哈希摄取作品、笺读、语境校音、朗读轨与媒体清单，并提供从 App 资源到文枢工作区再回到原资源结构的语义往返。适配器不直接写 iOS 仓库；交付包、媒体权利与验证流程见 [docs/XIANXINZIMO_ADAPTER.md](docs/XIANXINZIMO_ADAPTER.md)。
 

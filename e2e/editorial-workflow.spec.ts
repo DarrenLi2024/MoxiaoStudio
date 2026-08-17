@@ -2,7 +2,7 @@ import { expect, test, _electron as electron } from "@playwright/test";
 import { mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { createNewRecord, createWorkspace, digest, stableStringify } from "@moxiao/editorial";
-import { validatePdfBytes } from "@moxiao/publication";
+import { validateEpubBytes, validatePdfBytes } from "@moxiao/publication";
 
 const artifacts = resolve("artifacts/e2e");
 
@@ -35,6 +35,19 @@ test("本地工作区可新增、自动保存、筛选并查重", async () => {
     await page.reload();
     await workList.getByText(`${title}·改`, { exact: true }).click();
     await expect(page.getByLabel("作品题名")).toHaveValue(`${title}·改`);
+
+    await page.getByRole("tab", { name: "笺读编校" }).click();
+    await page.getByLabel("今译").fill("这是用于验证持久化的今译。");
+    await page.getByRole("button", { name: "＋ 添加笺注" }).click();
+    await page.getByLabel("第1条笺注锚点").fill("第一行");
+    await page.getByLabel("第1条笺注内容").fill("锚定第一行的笺注。");
+    await page.getByLabel("赏析").fill("这是用于验证完整笺读编校链路的赏析。");
+    await expect(page.getByRole("button", { name: "所有更改已保存" })).toBeVisible({ timeout: 5_000 });
+    await page.reload();
+    await workList.getByText(`${title}·改`, { exact: true }).click();
+    await page.getByRole("tab", { name: "笺读编校" }).click();
+    await expect(page.getByLabel("今译")).toHaveValue("这是用于验证持久化的今译。");
+    await expect(page.getByLabel("第1条笺注内容")).toHaveValue("锚定第一行的笺注。");
 
     await page.getByLabel("按体裁筛选").selectOption("qijue");
     await expect(page.getByText("江城夜雨", { exact: true })).toBeVisible();
@@ -100,9 +113,10 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
   test.setTimeout(120_000);
   mkdirSync(artifacts, { recursive: true });
   const output = join(artifacts, `publication-proof-${Date.now()}.pdf`);
+  const epubOutput = join(artifacts, `publication-proof-${Date.now()}.epub`);
   const application = await electron.launch({
     args: [resolve("apps/desktop/out/main/index.js")],
-    env: { ...process.env, MOXIAO_PROFILE: `publication-${process.pid}-${Date.now()}`, MOXIAO_THEME: "light", MOXIAO_E2E_PDF_PATH: output }
+    env: { ...process.env, MOXIAO_PROFILE: `publication-${process.pid}-${Date.now()}`, MOXIAO_THEME: "light", MOXIAO_E2E_PDF_PATH: output, MOXIAO_E2E_EPUB_PATH: epubOutput }
   });
 
   try {
@@ -119,7 +133,34 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
     await dialog.getByRole("button", { name: "导出并验证 PDF" }).click();
     await expect(dialog.getByText(/已导出 \d+ 页/u)).toBeVisible({ timeout: 60_000 });
     expect(validatePdfBytes(readFileSync(output)).ok).toBe(true);
+    await dialog.getByLabel("目标客户端").selectOption("epub");
+    await watermark.getByLabel("启用").uncheck();
+    await dialog.getByLabel("启用页眉页脚").uncheck();
+    await expect(dialog.getByText("预检通过，可安全导出")).toBeVisible();
+    await dialog.getByRole("button", { name: "导出并验证 EPUB" }).click();
+    await expect(dialog.getByText(/已导出 \d+ 个条目/u)).toBeVisible({ timeout: 60_000 });
+    expect(validateEpubBytes(readFileSync(epubOutput))).toMatchObject({ ok: true });
     await page.screenshot({ path: join(artifacts, "publication-center.png"), fullPage: true });
+  } finally {
+    await application.close();
+  }
+});
+
+test("笺读编校在窄屏深色与减弱动态效果下保持可用", async () => {
+  mkdirSync(artifacts, { recursive: true });
+  const application = await electron.launch({
+    args: [resolve("apps/desktop/out/main/index.js")],
+    env: { ...process.env, MOXIAO_PROFILE: `reading-visual-${process.pid}-${Date.now()}`, MOXIAO_THEME: "dark" }
+  });
+  try {
+    const page = await application.firstWindow();
+    await page.setViewportSize({ width: 980, height: 760 });
+    await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await page.getByRole("listbox", { name: "作品列表" }).getByText("春山小记", { exact: true }).click();
+    await page.getByRole("tab", { name: "笺读编校" }).click();
+    await expect(page.getByLabel("今译")).toBeVisible();
+    await expect(page.getByText("正文参照", { exact: true })).toBeVisible();
+    await page.screenshot({ path: join(artifacts, "reading-editor-dark-narrow.png"), fullPage: true });
   } finally {
     await application.close();
   }

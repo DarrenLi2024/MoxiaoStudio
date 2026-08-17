@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { EditorialWorkspace } from "@moxiao/editorial";
-import type { PreflightResult, PublicationDocument, PublicationProfile, RendererCapabilities } from "@moxiao/publication";
+import type { PreflightResult, PublicationAsset, PublicationDocument, PublicationProject, RendererCapabilities } from "@moxiao/publication";
 
 export interface MoxiaoRuntimeInfo {
   readonly platform: NodeJS.Platform;
@@ -16,7 +16,7 @@ export interface DuplicateView {
 }
 
 export interface PublicationPreviewView {
-  profile: PublicationProfile;
+  project: PublicationProject;
   document: PublicationDocument;
   html: string;
   preflight: PreflightResult;
@@ -28,7 +28,7 @@ export interface PublicationExportReceipt {
   filePath?: string;
   contentHash?: string;
   profile?: string;
-  validation?: { ok: boolean; pageCount: number; byteLength: number; issues: Array<{ severity: "error" | "warning"; code: string; message: string }> };
+  validation?: { ok: boolean; pageCount?: number; entryCount?: number; byteLength: number; issues: Array<{ severity: "error" | "warning"; code: string; message: string }> };
 }
 
 const api = {
@@ -44,8 +44,13 @@ const api = {
   resolveDuplicate: (removeId: string | null): Promise<EditorialWorkspace> => ipcRenderer.invoke("moxiao:workspace:resolve-duplicate", { removeId }),
   createVersion: (label: string): Promise<unknown> => ipcRenderer.invoke("moxiao:workspace:create-version", label),
   listVersions: (): Promise<unknown> => ipcRenderer.invoke("moxiao:workspace:list-versions"),
-  publicationPreview: (profile?: PublicationProfile): Promise<PublicationPreviewView> => ipcRenderer.invoke("moxiao:publication:preview", profile),
-  exportPublication: (profile: PublicationProfile): Promise<PublicationExportReceipt> => ipcRenderer.invoke("moxiao:publication:export", profile)
+  publicationProjects: (): Promise<PublicationProject[]> => ipcRenderer.invoke("moxiao:publication:projects"),
+  publicationProject: (projectId?: string): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:project", projectId),
+  createPublicationProject: (title: string): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:create-project", title),
+  savePublicationProject: (project: PublicationProject): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:save-project", project),
+  selectPublicationAsset: (input: { kind: PublicationAsset["kind"]; attachedRecordId?: string }): Promise<{ canceled: boolean; asset?: PublicationAsset }> => ipcRenderer.invoke("moxiao:publication:select-asset", input),
+  publicationPreview: (project?: PublicationProject): Promise<PublicationPreviewView> => ipcRenderer.invoke("moxiao:publication:preview", project),
+  exportPublication: (project: PublicationProject): Promise<PublicationExportReceipt> => ipcRenderer.invoke("moxiao:publication:export", project)
 };
 
 contextBridge.exposeInMainWorld("moxiao", api);

@@ -24,6 +24,10 @@ interface CountRow {
   count: number;
 }
 
+interface PublicationProjectRow {
+  payload_json: string;
+}
+
 export interface SemanticVersionReceipt {
   readonly id: EntityId;
   readonly workspaceId: string;
@@ -125,9 +129,20 @@ export class WorkspaceStore {
         created_at TEXT NOT NULL,
         delivered_at TEXT
       ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS publication_projects (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_publication_projects_workspace ON publication_projects(workspace_id, updated_at DESC);
     `);
     this.database.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)")
       .run(1, new Date().toISOString());
+    this.database.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+      .run(2, new Date().toISOString());
   }
 
   initializeWorkspace(workspaceId: string, workspaceValue: EditorialWorkspace): EditorialWorkspace {
@@ -232,6 +247,30 @@ export class WorkspaceStore {
   tombstoneCount(workspaceId: string): number {
     const row = this.database.prepare("SELECT COUNT(*) AS count FROM tombstones WHERE workspace_id = ?").get(workspaceId) as unknown as CountRow;
     return row.count;
+  }
+
+  loadPublicationProject<T>(workspaceId: string, projectId: string): T | null {
+    const row = this.database.prepare("SELECT payload_json FROM publication_projects WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, projectId) as unknown as PublicationProjectRow | undefined;
+    return row ? JSON.parse(row.payload_json) as T : null;
+  }
+
+  listPublicationProjects<T>(workspaceId: string): T[] {
+    const rows = this.database.prepare("SELECT payload_json FROM publication_projects WHERE workspace_id = ? ORDER BY updated_at DESC, id")
+      .all(workspaceId) as unknown as PublicationProjectRow[];
+    return rows.map((row) => JSON.parse(row.payload_json) as T);
+  }
+
+  savePublicationProject<T>(workspaceId: string, projectId: string, value: T, now = new Date().toISOString()): T {
+    if (!this.hasWorkspace(workspaceId)) throw new Error(`工作区不存在：${workspaceId}`);
+    const payload = stableStringify(value);
+    this.database.prepare(`
+      INSERT INTO publication_projects(id, workspace_id, payload_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
+      WHERE publication_projects.workspace_id = excluded.workspace_id
+    `).run(projectId, workspaceId, payload, now);
+    return JSON.parse(payload) as T;
   }
 
   private currentRevision(workspaceId: string): number {
