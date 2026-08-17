@@ -7,7 +7,6 @@ import { validateEpubBytes, validatePdfBytes } from "@moxiao/publication";
 const artifacts = resolve("artifacts/e2e");
 
 test("本地工作区可新增、自动保存、筛选并查重", async () => {
-  test.setTimeout(60_000);
   mkdirSync(artifacts, { recursive: true });
   const profile = `e2e-${process.pid}-${Date.now()}`;
   const application = await electron.launch({
@@ -157,6 +156,7 @@ test("笺读编校在窄屏深色与减弱动态效果下保持可用", async ()
     const page = await application.firstWindow();
     await page.setViewportSize({ width: 980, height: 760 });
     await page.emulateMedia({ colorScheme: "dark", reducedMotion: "reduce" });
+    await expect(page.getByRole("complementary", { name: "语义检查器" })).toBeHidden();
     await page.getByRole("listbox", { name: "作品列表" }).getByText("春山小记", { exact: true }).click();
     await page.getByRole("tab", { name: "笺读编校" }).click();
     await expect(page.getByLabel("今译")).toBeVisible();

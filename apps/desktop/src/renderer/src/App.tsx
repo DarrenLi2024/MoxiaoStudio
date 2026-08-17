@@ -73,7 +73,7 @@ export function App() {
   const [formFilter, setFormFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
   const [changedOnly, setChangedOnly] = useState(false);
-  const [inspectorOpen, setInspectorOpen] = useState(true);
+  const [inspectorOpen, setInspectorOpen] = useState(() => !window.matchMedia("(max-width: 1240px)").matches);
   const [runtimeLabel, setRuntimeLabel] = useState("本地模式");
   const [saveMode, setSaveMode] = useState<SaveMode>("loading");
   const [saveError, setSaveError] = useState("");
@@ -108,6 +108,15 @@ export function App() {
       setSaveError(error instanceof Error ? error.message : String(error));
     });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const narrowLayout = window.matchMedia("(max-width: 1240px)");
+    const collapseInspector = (event: MediaQueryListEvent) => {
+      if (event.matches) setInspectorOpen(false);
+    };
+    narrowLayout.addEventListener("change", collapseInspector);
+    return () => narrowLayout.removeEventListener("change", collapseInspector);
   }, []);
 
   const records = useMemo(() => workspace?.records.filter((record) => record.operation !== "delete") ?? [], [workspace]);
