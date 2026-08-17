@@ -24,10 +24,14 @@ pnpm validate:epub "/绝对路径/书稿.epub"
 DMG 挂载后，使用包内可执行文件做冷启动冒烟测试：
 
 ```bash
-MOXIAO_PACKAGED_APP="/Volumes/墨校台文枢/墨校台文枢.app/Contents/MacOS/墨校台文枢" pnpm test:package
+MOXIAO_PACKAGED_APP="/Volumes/墨校台文枢/墨校台文枢.app/Contents/MacOS/墨校台文枢" \
+MOXIAO_E2E_PDF_PATH="/private/tmp/moxiao-packaged-proof.pdf" \
+pnpm test:package
 ```
 
-该测试必须看到“一卷通校”、SQLite WAL 状态与可用的新增作品入口，并真实点击“出版”、打开出版中心、看到预检结果，证明验收对象是安装包而非开发构建。
+该测试必须看到“一卷通校”、SQLite WAL 状态与可用的新增作品入口，并真实点击“出版”、打开出版中心、看到预检结果；提供 `MOXIAO_E2E_PDF_PATH` 时还会从包内应用真实导出 PDF 并验证文件结构，证明验收对象是安装包而非开发构建。
+
+大体量书稿发行候选还须使用正式资料库的隔离副本导出一次完整 PDF，确认条目数、页数、文件字节数和 `validatePdfBytes` 结果。测试不得连接或改写用户正式资料库。
 
 兼容旧审校包可执行：
 

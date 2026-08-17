@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
@@ -182,10 +182,13 @@ async function exportPublication(projectValue: unknown): Promise<unknown> {
     if (selection.canceled || !selection.filePath) return { canceled: true };
     filePath = selection.filePath;
   }
-  const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  printWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const printHtmlPath = join(tmpdir(), `moxiao-print-${process.pid}-${createEntityId()}.html`);
+  writeFileSync(printHtmlPath, preview.html, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  let printWindow: BrowserWindow | undefined;
   try {
-    await printWindow.loadURL(`data:text/html;base64,${Buffer.from(preview.html).toString("base64")}`);
+    printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    printWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    await printWindow.loadFile(printHtmlPath);
     await printWindow.webContents.executeJavaScript("document.fonts.ready.then(() => true)");
     const bytes = await printWindow.webContents.printToPDF(electronPrintOptions(project.profile));
     const validation = validatePdfBytes(bytes);
@@ -194,7 +197,8 @@ async function exportPublication(projectValue: unknown): Promise<unknown> {
     const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
     return { canceled: false, filePath, contentHash, validation, profile: project.profile.pdfProfile };
   } finally {
-    printWindow.destroy();
+    if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+    unlinkSync(printHtmlPath);
   }
 }
 
