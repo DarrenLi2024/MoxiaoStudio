@@ -10,7 +10,7 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist:mac:raw": "pnpm build && electron-builder --mac dmg --arm64 --publish never",
+    "dist:mac:raw": "pnpm build && electron-builder --mac dmg --arm64 --publish never --config.electronDist=node_modules/electron/dist",
     "pack:mac": "pnpm build && electron-builder --mac dir --arm64 --publish never",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"

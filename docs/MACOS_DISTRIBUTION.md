@@ -5,6 +5,7 @@
 面向 GitHub 或官网直接下载的 macOS 应用必须同时满足：Developer ID Application 签名、Hardened Runtime、安全时间戳、Apple 公证、应用与 DMG 票据装订、Gatekeeper 验收。临时签名、Apple Development 签名和仅移除隔离属性都不属于公开发行方案。
 
 官方命令 `pnpm dist:mac` 采用失败关闭策略：缺少 Developer ID 或 notarytool 凭据时立即退出，不生成可误传的公开包。
+封装直接复用 pnpm 已安装并锁定版本的 `electron/dist`，避免 electron-builder 在发行阶段再次访问不稳定的远程 Electron 分发源；依赖目录缺失时仍会失败关闭。
 
 ## 一次性配置
 
