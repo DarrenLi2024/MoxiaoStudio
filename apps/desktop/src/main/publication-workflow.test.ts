@@ -24,4 +24,12 @@ describe("出版项目编选", () => {
     const project = { ...base, entries: base.entries.map((entry) => ({ ...entry, manualOrder: entry.recordId === first.id ? 2 : 1 })) };
     expect(selectedPublicationRecords(workspace, project).map(({ record }) => record.id)).toEqual([second.id, first.id]);
   });
+
+  it("旧版字符串校勘记不会阻断出版文档生成", () => {
+    const record = createNewRecord({ title: "旧笺读", form: "sanwen", body: "正文", sequence: 1 });
+    record.draft.reading = { textualNotes: ["旧版校勘文字"] as unknown as Array<{ note: string }> };
+    const workspace = createWorkspace("full", [record]);
+    const document = publicationDocument(workspace, createDefaultPublicationProject(workspace));
+    expect(document.sections[0]?.blocks).toContainEqual({ type: "paragraph", text: "旧版校勘文字" });
+  });
 });

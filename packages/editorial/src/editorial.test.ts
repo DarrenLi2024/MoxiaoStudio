@@ -26,6 +26,26 @@ describe("XZM-EW 摄取与治理", () => {
     expect(imported.records[0]?.entityId[14]).toBe("7");
   });
 
+  it("稳定迁移旧版字符串校勘记且不掩盖基线摘要异常", () => {
+    const record = createNewRecord({ title: "旧笺读", form: "sanwen", body: "正文", sequence: 1 });
+    record.operation = undefined;
+    record.baseline = structuredClone(record.draft);
+    record.baseline.reading = { textualNotes: ["旧版校勘文字"] as unknown as Array<{ note: string }> };
+    record.draft = structuredClone(record.baseline);
+    const legacyHash = digest(record.baseline);
+    record.sourceHash = legacyHash;
+
+    const imported = importLegacyWorkspace(createWorkspace("full", [record]));
+    expect(imported.records[0]?.baseline.reading?.textualNotes).toEqual([{ note: "旧版校勘文字" }]);
+    expect(imported.records[0]?.draft.reading?.textualNotes).toEqual([{ note: "旧版校勘文字" }]);
+    expect(imported.records[0]?.sourceHash).toBe(digest(imported.records[0]!.baseline));
+    expect(imported.records[0]?.sourceHash).not.toBe(legacyHash);
+
+    const tampered = structuredClone(record);
+    tampered.sourceHash = "sha256:tampered";
+    expect(() => importLegacyWorkspace(createWorkspace("full", [tampered]))).toThrow("基线摘要不匹配");
+  });
+
   it("解析多体裁批量文本并拒绝空正文", () => {
     expect(parseBatchSource("《第一篇》\n体裁：七绝\n第一句\n---\n# 第二篇\n第二篇正文", "xinshi", forms)).toEqual([
       { title: "第一篇", form: "qijue", body: "第一句" },

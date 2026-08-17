@@ -114,7 +114,12 @@ export function publicationDocument(workspace: EditorialWorkspace, project: Publ
     if (selection.includeTranslation && reading?.translation?.trim()) blocks.push({ type: "heading", level: 2, text: "今译" }, { type: "paragraph", text: reading.translation.trim() });
     if (selection.includeAnnotations) for (const annotation of reading?.annotations ?? []) blocks.push({ type: "annotation", marker: annotation.anchor, text: annotation.note });
     if (selection.includeAppreciation && reading?.appreciation?.trim()) blocks.push({ type: "heading", level: 2, text: "赏析" }, { type: "paragraph", text: reading.appreciation.trim() });
-    for (const note of reading?.textualNotes ?? []) if (note.note.trim()) blocks.push({ type: "heading", level: 3, text: note.title?.trim() || "校勘记" }, { type: "paragraph", text: note.note.trim() });
+    for (const value of (reading?.textualNotes ?? []) as unknown[]) {
+      const note = typeof value === "string" ? { note: value } : value && typeof value === "object" ? value as Record<string, unknown> : { note: "" };
+      const text = typeof note.note === "string" ? note.note.trim() : "";
+      const title = typeof note.title === "string" ? note.title.trim() : "";
+      if (text) blocks.push({ type: "heading", level: 3, text: title || "校勘记" }, { type: "paragraph", text });
+    }
     if (reading?.editionNote?.trim()) blocks.push({ type: "heading", level: 3, text: "版本说明" }, { type: "paragraph", text: reading.editionNote.trim() });
     sections.push({ id: record.entityId, role: "body", title: work.editorialTitle?.trim() || work.title.trim() || "未题名", blocks });
   }

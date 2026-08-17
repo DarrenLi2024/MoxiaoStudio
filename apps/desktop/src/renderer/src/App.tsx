@@ -209,8 +209,10 @@ export function App() {
       setPublicationIssues(preview.preflight.issues);
       setDialogMode("publication");
     } catch (error) {
-      setSaveMode("error");
-      setSaveError(error instanceof Error ? error.message : String(error));
+      const message = error instanceof Error ? error.message : String(error);
+      setPublicationProject(null);
+      setPublicationReceipt(`出版中心无法打开：${message}`);
+      setDialogMode("publication");
     } finally {
       setPublicationBusy(false);
     }
@@ -449,6 +451,7 @@ export function App() {
               <footer><button className="quiet-button" onClick={() => void resolveDuplicate(null)}>两篇均保留</button><button className="danger-button" onClick={() => void resolveDuplicate(currentDuplicate.right.id)}>保留左篇，删除右篇</button><button className="danger-button" onClick={() => void resolveDuplicate(currentDuplicate.left.id)}>删除左篇，保留右篇</button></footer>
             </>}
           </div>}
+          {dialogMode === "publication" && !publicationProject && <div className="publication-load-error" role="alert"><CircleAlert size={24} /><div><strong>出版中心暂时无法打开</strong><p>{publicationReceipt || "请关闭后重试；若问题持续，请导出备份并联系维护者。"}</p></div></div>}
           {dialogMode === "publication" && publicationProject && <div className="publication-content">
             <aside className="publication-controls">
               <fieldset><legend>书稿项目</legend><label>当前项目<select aria-label="当前出版项目" value={publicationProject.id} onChange={(event) => { const project = publicationProjects.find((item) => item.id === event.target.value); if (project) setPublicationProject(project); }}>{publicationProjects.map((project) => <option value={project.id} key={project.id}>{project.title}</option>)}</select></label><button className="asset-button" onClick={() => void createPublicationProject()}>＋ 新建另一部书稿</button><label>书名<input value={publicationProject.title} onChange={(event) => updatePublication((project) => ({ ...project, title: event.target.value }))} /></label><label>副题<input value={publicationProject.subtitle} onChange={(event) => updatePublication((project) => ({ ...project, subtitle: event.target.value }))} /></label><label>作者<input value={publicationProject.creator} onChange={(event) => updatePublication((project) => ({ ...project, creator: event.target.value }))} /></label><label>简介<textarea value={publicationProject.description} onChange={(event) => updatePublication((project) => ({ ...project, description: event.target.value }))} /></label></fieldset>
