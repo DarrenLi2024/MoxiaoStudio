@@ -41,7 +41,9 @@ SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义�
 
 所有导出先生成与界面无关的 `PublicationDocument`，再应用 `PublicationProfile`。每个渲染适配器声明 `RendererCapabilities`；预检不通过时不得静默导出。
 
-`PublicationProject` 位于活母本与 `PublicationDocument` 之间，独立保存书名、篇目收录、作者编定顺序、体裁/系年筛选、封面、插图、字体和主题。出版项目不得改写作品 `seq`；多部书稿可以引用同一作品表达。生成成品时锁定项目、母本修订和表达哈希，形成新的 `Manifestation`。
+`PublicationProject` 位于活母本与 `PublicationDocument` 之间，当前格式为 1.1，独立保存书名、篇目收录、作者编定顺序、体裁/系年筛选、前置页事实、编校信息策略、媒体位置、字体和语义主题。出版项目不得改写作品 `seq`；多部书稿可以引用同一作品表达。生成成品时锁定项目、母本修订和表达哈希，形成新的 `Manifestation`。
+
+智能编排只生成可解释候选，篇目可以锁定位置，应用前保存旧顺序并可撤销。意境标签由当前正文、题注和赏析确定性推断，不写回作品事实层。媒体资产与摆放位置分离，同一图片可以在多个篇目复用；移除篇目位置不删除图库原图。`PublicationDocument` 使用 `cover`、`copyright`、`foreword`、`toc`、`chapter`、`author-bio`、`apparatus` 等语义角色，PDF、EPUB 和内容包不得各自重新推导成书内容。
 
 默认开源渲染路径计划使用 Vivliostyle；专业印刷可选接入受许可的 Prince 或出版社指定引擎。PDF、EPUB、DOCX、Web 和闲心子墨内容包均消费同一 Publication IR。
 

@@ -1,6 +1,6 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { EditorialWorkspace } from "@moxiao/editorial";
-import type { PreflightResult, PublicationAsset, PublicationDocument, PublicationProject, RendererCapabilities } from "@moxiao/publication";
+import type { ArrangementProposal, PreflightResult, PublicationAsset, PublicationDocument, PublicationProject, RendererCapabilities } from "@moxiao/publication";
 
 export interface MoxiaoRuntimeInfo {
   readonly platform: NodeJS.Platform;
@@ -48,6 +48,8 @@ const api = {
   publicationProject: (projectId?: string): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:project", projectId),
   createPublicationProject: (title: string): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:create-project", title),
   savePublicationProject: (project: PublicationProject): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:save-project", project),
+  generatePublicationFrontMatter: (project: PublicationProject): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:generate-frontmatter", project),
+  proposePublicationArrangement: (project: PublicationProject, strategy: ArrangementProposal["strategy"]): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:propose-arrangement", project, strategy),
   selectPublicationAsset: (input: { kind: PublicationAsset["kind"]; attachedRecordId?: string }): Promise<{ canceled: boolean; asset?: PublicationAsset }> => ipcRenderer.invoke("moxiao:publication:select-asset", input),
   publicationPreview: (project?: PublicationProject): Promise<PublicationPreviewView> => ipcRenderer.invoke("moxiao:publication:preview", project),
   exportPublication: (project: PublicationProject): Promise<PublicationExportReceipt> => ipcRenderer.invoke("moxiao:publication:export", project)

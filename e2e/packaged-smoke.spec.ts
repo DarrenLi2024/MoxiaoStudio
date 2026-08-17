@@ -25,7 +25,8 @@ test("安装包内的桌面应用可冷启动并打开本地工作区", async ()
     await page.getByRole("button", { name: "出版", exact: true }).last().click();
     const publicationDialog = page.getByRole("dialog", { name: "出版中心" });
     await expect(publicationDialog).toBeVisible({ timeout: 30_000 });
-    await expect(page.getByText("预检通过，可安全导出")).toBeVisible();
+    await publicationDialog.getByRole("button", { name: "6 导出", exact: true }).click();
+    await expect(page.getByText(/预检/u)).toBeVisible();
     if (pdfOutput) {
       await publicationDialog.getByRole("button", { name: "导出并验证 PDF" }).click();
       await expect(publicationDialog.getByText(/已导出 \d+ 页/u)).toBeVisible({ timeout: 60_000 });

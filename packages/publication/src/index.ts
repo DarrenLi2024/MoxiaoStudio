@@ -1,4 +1,16 @@
 import type { ContentHash, EntityId } from "@moxiao/domain";
+import type { PublicationTheme } from "./project";
+
+export interface PublicationStatistics {
+  readonly workCount: number;
+  readonly bodyCharacters: number;
+  readonly translationCharacters: number;
+  readonly annotationCharacters: number;
+  readonly appreciationCharacters: number;
+  readonly totalCharacters: number;
+  readonly genreCounts: Readonly<Record<string, number>>;
+  readonly chronologyRange?: readonly [number, number];
+}
 
 export type PdfProfile = "screen" | "PDF/X-1a" | "PDF/X-4" | "PDF/A-2b" | "PDF/UA-1";
 
@@ -10,22 +22,25 @@ export interface PublicationDocument {
   readonly language: string;
   readonly creator?: string;
   readonly description?: string;
+  readonly statistics?: PublicationStatistics;
   readonly sections: readonly PublicationSection[];
 }
 
 export interface PublicationSection {
   readonly id: EntityId;
   readonly role: "frontmatter" | "body" | "backmatter";
+  readonly semanticRole?: "cover" | "title-page" | "copyright" | "foreword" | "toc" | "chapter" | "author-bio" | "apparatus";
   readonly title?: string;
   readonly blocks: readonly PublicationBlock[];
 }
 
 export type PublicationBlock =
-  | { readonly type: "heading"; readonly text: string; readonly level: 1 | 2 | 3 }
-  | { readonly type: "paragraph"; readonly text: string }
+  | { readonly type: "heading"; readonly text: string; readonly level: 1 | 2 | 3; readonly semanticRole?: "translation" | "appreciation" | "apparatus" }
+  | { readonly type: "paragraph"; readonly text: string; readonly semanticRole?: "copyright" | "foreword" | "author-bio" | "translation" | "appreciation" | "apparatus" }
   | { readonly type: "verse"; readonly lines: readonly string[] }
-  | { readonly type: "image"; readonly assetId: EntityId; readonly alt: string; readonly caption?: string }
-  | { readonly type: "annotation"; readonly marker: string; readonly text: string };
+  | { readonly type: "image"; readonly assetId: EntityId; readonly alt: string; readonly caption?: string; readonly placement?: "cover" | "chapter-opening" | "inline" | "plate" | "endpiece"; readonly alignment?: "center" | "left" | "right"; readonly size?: "small" | "medium" | "wide" | "full-page"; readonly focalPoint?: readonly [number, number] }
+  | { readonly type: "annotation"; readonly marker: string; readonly text: string; readonly semanticRole?: "composition-note" | "annotation" }
+  | { readonly type: "toc"; readonly entries: readonly { readonly title: string; readonly targetId: EntityId; readonly group?: string }[] };
 
 export interface WatermarkOptions {
   readonly enabled: boolean;
@@ -216,15 +231,17 @@ function pageDimensions(profile: PublicationProfile): string {
 }
 
 function blockHtml(block: PublicationBlock, assets: ReadonlyMap<string, PublicationAssetDeclaration>): string {
-  if (block.type === "heading") return `<h${block.level}>${escapeHtml(block.text)}</h${block.level}>`;
-  if (block.type === "paragraph") return `<p>${escapeHtml(block.text).replaceAll("\n", "<br>")}</p>`;
+  if (block.type === "heading") return `<h${block.level} class="block-${block.semanticRole ?? "heading"}">${escapeHtml(block.text)}</h${block.level}>`;
+  if (block.type === "paragraph") return `<p class="block-${block.semanticRole ?? "body"}">${escapeHtml(block.text).replaceAll("\n", "<br>")}</p>`;
   if (block.type === "verse") return `<div class="verse">${block.lines.map((line) => `<p>${escapeHtml(line) || "&nbsp;"}</p>`).join("")}</div>`;
-  if (block.type === "annotation") return `<aside class="annotation"><b>${escapeHtml(block.marker)}</b>${escapeHtml(block.text)}</aside>`;
+  if (block.type === "annotation") return `<aside class="annotation annotation-${block.semanticRole ?? "annotation"}"><b>${escapeHtml(block.marker)}</b>${escapeHtml(block.text)}</aside>`;
+  if (block.type === "toc") return `<nav class="book-toc" aria-label="目录"><ol>${block.entries.map((entry) => `<li>${entry.group ? `<span>${escapeHtml(entry.group)}</span>` : ""}<a href="#section-${entry.targetId}">${escapeHtml(entry.title)}</a></li>`).join("")}</ol></nav>`;
   const asset = assets.get(block.assetId);
-  return `<figure data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
+  const focal = block.focalPoint ?? [0.5, 0.5];
+  return `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"}" data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}" style="object-position:${focal[0] * 100}% ${focal[1] * 100}%">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
 }
 
-export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile, assetList: readonly PublicationAssetDeclaration[] = []): string {
+export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile, assetList: readonly PublicationAssetDeclaration[] = [], theme?: PublicationTheme): string {
   const margins = profile.marginsMm ?? { top: 22, right: 19, bottom: 22, left: 19 };
   const watermark = profile.watermark.enabled && profile.watermark.kind === "text"
     ? `<div class="watermark watermark-${profile.watermark.placement}">${escapeHtml(profile.watermark.content)}</div>`
@@ -233,16 +250,20 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
   const footer = profile.runningContent.enabled ? runningTemplateCss(profile.runningContent.footerTemplate, document.title) : "none";
   const assets = new Map(assetList.map((asset) => [asset.id, asset]));
   const fontFaces = assetList.filter((asset) => asset.kind === "font" && asset.dataUri && asset.fontFamily).map((asset) => `@font-face{font-family:"${cssText(asset.fontFamily!)}";src:url("${cssText(asset.dataUri!)}") format("${asset.mediaType.includes("woff2") ? "woff2" : asset.mediaType.includes("woff") ? "woff" : asset.mediaType.includes("otf") ? "opentype" : "truetype"}");font-display:block}`).join("");
-  const sections = document.sections.map((section) => `<section class="section section-${section.role}">${section.title ? `<h1>${escapeHtml(section.title)}</h1>` : ""}${profile.ornament && profile.ornament !== "none" ? `<div class="ornament ornament-${profile.ornament}" aria-hidden="true">${profile.ornament === "cloud" ? "☁" : profile.ornament === "bamboo" ? "❦" : "◇"}</div>` : ""}${section.blocks.map((block) => blockHtml(block, assets)).join("")}</section>`).join("");
+  let bodyIndex = 0;
+  const sections = document.sections.map((section) => {
+    const number = section.role === "body" ? ++bodyIndex : 0;
+    return `<section id="section-${section.id}" class="section section-${section.role} semantic-${section.semanticRole ?? "chapter"}">${section.title ? `<h1>${theme?.titleStyle === "numbered" && number ? `<span class="chapter-number">${String(number).padStart(2, "0")}</span>` : ""}${escapeHtml(section.title)}</h1>` : ""}${profile.ornament && profile.ornament !== "none" ? `<div class="ornament ornament-${profile.ornament}" aria-hidden="true">${profile.ornament === "cloud" ? "☁" : profile.ornament === "bamboo" ? "❦" : "◇"}</div>` : ""}${section.blocks.map((block) => blockHtml(block, assets)).join("")}</section>`;
+  }).join("");
   const watermarkPosition = profile.watermark.placement === "corner" ? "right:12mm;bottom:12mm" : "left:50%;top:50%;transform:translate(-50%,-50%) rotate(var(--watermark-rotation))";
   return `<!doctype html>
 <html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;"><title>${escapeHtml(document.title)}</title>
 <style>
 ${fontFaces}
-:root{--watermark-opacity:${profile.watermark.opacity};--watermark-rotation:${profile.watermark.rotation}deg}
+:root{--watermark-opacity:${profile.watermark.opacity};--watermark-rotation:${profile.watermark.rotation}deg;--accent:${profile.accentColor ?? "#315f4d"}}
 @page{size:${pageDimensions(profile)};margin:${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;${profile.bleedMm ? `bleed:${profile.bleedMm}mm;` : ""}${profile.cropMarks ? "marks:crop cross;" : ""}@top-center{content:${header};font:9px system-ui;color:#7d837c}@bottom-center{content:${footer};font:9px system-ui;color:#7d837c}}
 @page:first{@top-center{content:${profile.runningContent.suppressOnFirstPage ? "none" : header}}}
-*{box-sizing:border-box}body{margin:0;color:#20241f;background:#fffef9;font-family:${profile.bodyFont ?? '"Songti SC","STSong","Noto Serif CJK SC",serif'};writing-mode:${profile.writingMode};font-size:${profile.baseFontPt ?? 11.5}pt;line-height:${profile.lineHeight ?? 1.9}}.section{break-after:page}.section:last-child{break-after:auto}h1,h2,h3{break-after:avoid;font-family:${profile.headingFont ?? profile.bodyFont ?? '"Songti SC","STSong",serif'};font-weight:600;letter-spacing:.08em;color:${profile.accentColor ?? "#315f4d"}}h1{font-size:24pt;margin:0 0 6mm;text-align:center}.ornament{text-align:center;margin:0 0 12mm;color:${profile.accentColor ?? "#315f4d"};opacity:.66}.ornament-rule{font-size:10pt;letter-spacing:.5em}.ornament-cloud,.ornament-bamboo{font-size:14pt}h2{font-size:18pt}h3{font-size:14pt}p{margin:0 0 4mm}.verse{margin:8mm 0;text-align:center;font-size:13pt;line-height:2}.verse p{margin:0}.annotation{margin:5mm 0;padding:4mm;border-left:1.5px solid ${profile.accentColor ?? "#759486"};background:#f5f7f3;color:#505851}.annotation b{margin-right:2mm;color:${profile.accentColor ?? "#315f4d"}}.watermark{position:fixed;z-index:${profile.watermark.layer === "under-content" ? "-1" : "20"};${watermarkPosition};opacity:var(--watermark-opacity);color:#315f4d;font:600 25pt system-ui;white-space:nowrap;pointer-events:none}.watermark-tile{inset:0;transform:none;display:grid;place-items:center;background-image:repeating-linear-gradient(-28deg,transparent 0 46mm,rgba(49,95,77,.04) 46mm 48mm)}figure{text-align:center;break-inside:avoid}figure img{max-width:100%;max-height:170mm;object-fit:contain}.missing-image{display:grid;min-height:45mm;place-items:center;border:1px solid #dfe3dc;color:#969d96}figcaption{margin-top:2mm;font-size:9pt;color:#70776f}
+*{box-sizing:border-box}body{margin:0;color:#20241f;background:#fffef9;font-family:${profile.bodyFont ?? '"Songti SC","STSong","Noto Serif CJK SC",serif'};writing-mode:${profile.writingMode};font-size:${profile.baseFontPt ?? 11.5}pt;line-height:${profile.lineHeight ?? 1.9}}.section{break-after:page}.section:last-child{break-after:auto}h1,h2,h3{break-after:avoid;font-family:${profile.headingFont ?? profile.bodyFont ?? '"Songti SC","STSong",serif'};font-weight:600;letter-spacing:.08em;color:var(--accent)}h1{font-size:24pt;margin:0 0 6mm;text-align:${theme?.titleStyle === "left-modern" ? "left" : "center"}}.chapter-number{display:block;margin-bottom:2mm;font:9pt system-ui;letter-spacing:.18em;opacity:.6}.ornament{text-align:center;margin:0 0 12mm;color:var(--accent);opacity:.66}.ornament-rule{font-size:10pt;letter-spacing:.5em}.ornament-cloud,.ornament-bamboo{font-size:14pt}h2{font-size:18pt}h3{font-size:14pt}p{margin:0 0 ${theme?.density === "compact" ? "3mm" : theme?.density === "relaxed" ? "5mm" : "4mm"}}.verse{margin:8mm 0;text-align:center;font-size:13pt;line-height:2}.verse p{margin:0}.annotation{margin:5mm 0;padding:${theme?.annotationStyle === "inline" ? "0" : "4mm"};border-left:${theme?.annotationStyle === "list" ? "0" : `1.5px solid ${profile.accentColor ?? "#759486"}`};background:${theme?.annotationStyle === "panel" ? "#f5f7f3" : "transparent"};color:#505851}.annotation b{margin-right:2mm;color:var(--accent)}.block-translation{${theme?.translationStyle === "panel" ? "padding:4mm;background:#f5f7f3" : theme?.translationStyle === "rule" ? "padding-left:4mm;border-left:1px solid var(--accent)" : ""}}.block-appreciation{${theme?.appreciationStyle === "panel" ? "padding:4mm;background:#f7f5ef" : theme?.appreciationStyle === "rule" ? "padding-top:4mm;border-top:1px solid #d8d8d0" : ""}}.semantic-title-page,.semantic-copyright,.semantic-foreword,.semantic-author-bio{display:grid;align-content:center;min-height:160mm}.semantic-title-page{text-align:center}.semantic-copyright{align-content:end;font-size:9.5pt;line-height:1.7}.book-toc ol{margin:0;padding:0;list-style:none}.book-toc li{display:flex;gap:3mm;align-items:baseline;padding:2.2mm 0;border-bottom:1px dotted #c8cdc6}.book-toc li span{width:18mm;color:#7d837c;font-size:9pt}.book-toc a{color:inherit;text-decoration:none}.watermark{position:fixed;z-index:${profile.watermark.layer === "under-content" ? "-1" : "20"};${watermarkPosition};opacity:var(--watermark-opacity);color:#315f4d;font:600 25pt system-ui;white-space:nowrap;pointer-events:none}.watermark-tile{inset:0;transform:none;display:grid;place-items:center;background-image:repeating-linear-gradient(-28deg,transparent 0 46mm,rgba(49,95,77,.04) 46mm 48mm)}figure{text-align:center;break-inside:avoid}figure.align-left{text-align:left}figure.align-right{text-align:right}figure.image-small img{max-width:35%}figure.image-medium img{max-width:62%}figure.image-wide img{max-width:100%}figure.image-full-page{break-before:page;break-after:page}figure.image-full-page img{width:100%;height:160mm}figure img{max-height:170mm;object-fit:contain}.missing-image{display:grid;min-height:45mm;place-items:center;border:1px solid #dfe3dc;color:#969d96}figcaption{margin-top:2mm;font-size:9pt;color:#70776f}
 </style></head><body>${watermark}<main>${sections}</main></body></html>`;
 }
 
@@ -284,7 +305,7 @@ export interface PublicationAssetDeclaration {
   readonly mediaType: string;
   readonly rights: "owned" | "licensed" | "public-domain" | "unknown";
   readonly source?: string;
-  readonly kind?: "cover" | "illustration" | "font" | "ornament";
+  readonly kind?: "cover" | "illustration" | "font" | "ornament" | "portrait";
   readonly fileName?: string;
   readonly dataUri?: string;
   readonly fontFamily?: string;
@@ -292,6 +313,7 @@ export interface PublicationAssetDeclaration {
 
 export * from "./project";
 export * from "./epub";
+export * from "./arrangement";
 
 export interface RendererCapabilities {
   readonly adapterId: string;
@@ -337,7 +359,7 @@ export function validatePublication(
   for (const section of document.sections) {
     if (!section.blocks.length) issues.push({ severity: "warning", code: "section.blocks.empty", message: `${section.title ?? section.id} 没有正文块` });
     for (const block of section.blocks) {
-      const text = block.type === "verse" ? block.lines.join("\n") : block.type === "image" ? block.alt : block.text;
+      const text = block.type === "verse" ? block.lines.join("\n") : block.type === "image" ? block.alt : block.type === "toc" ? block.entries.map((entry) => entry.title).join("\n") : block.text;
       if (text.includes("\uFFFD")) issues.push({ severity: "error", code: "text.replacement-character", message: `${section.title ?? section.id} 含有无法解码字符` });
       if (block.type !== "image") continue;
       if (!block.alt.trim()) issues.push({ severity: "error", code: "image.alt.required", message: `${section.title ?? section.id} 的插图缺少替代文字` });

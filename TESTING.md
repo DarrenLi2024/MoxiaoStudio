@@ -18,8 +18,8 @@ pnpm validate:epub "/绝对路径/书稿.epub"
 `pnpm check` 必须顺序执行上述三项并返回退出码 0。
 
 桌面关键链路在构建后运行 `pnpm test:e2e`。测试使用独立临时资料库，启动真实 Electron 窗口，验证新增、编辑自动保存、重载持久化、体裁筛选和查重入口；截图保存到 `artifacts/e2e/`，不得连接用户正式资料库。
-同一套端到端测试还会打开出版中心、启用文字水印、验证分页预览、导出真实 A5 Tagged PDF，并复核文件签名、页数和结束标记。
-测试随后切换到 EPUB 3，显式关闭 EPUB 不支持的水印和页眉页脚，生成真实 `.epub` 并复核 mimetype、container、OPF、导航和章节条目；另用深色窄窗口与减弱动态效果打开笺读编辑器，验证语义检查器自动收起且不遮挡编辑区，并保留截图。
+同一套端到端测试还会走完出版中心六步流程，应用意境编排候选、确认前置页、切换语义主题、为单篇添加随文锚点插图、启用文字水印，导出真实 A5 Tagged PDF，并复核文件签名、页数和结束标记。
+测试随后切换到 EPUB 3，显式关闭 EPUB 不支持的水印和页眉页脚，生成真实 `.epub` 并复核 mimetype、container、OPF、导航和章节条目；另用深色窄窗口、115% 缩放与减弱动态效果打开笺读和出版中心，验证控件不横向溢出并保留截图。
 
 DMG 挂载后，使用包内可执行文件做冷启动冒烟测试：
 
@@ -32,6 +32,14 @@ pnpm test:package
 该测试必须看到“一卷通校”、SQLite WAL 状态与可用的新增作品入口，并真实点击“出版”、打开出版中心、看到预检结果；提供 `MOXIAO_E2E_PDF_PATH` 时还会从包内应用真实导出 PDF 并验证文件结构，证明验收对象是安装包而非开发构建。
 
 大体量书稿发行候选还须使用正式资料库的隔离副本导出一次完整 PDF，确认条目数、页数、文件字节数和 `validatePdfBytes` 结果。测试不得连接或改写用户正式资料库。
+
+```bash
+MOXIAO_LARGE_DB_COPY="/绝对路径/在线备份.sqlite" \
+MOXIAO_E2E_PDF_PATH="/private/tmp/整卷验收.pdf" \
+pnpm test:large-publication
+```
+
+`MOXIAO_LARGE_DB_COPY` 必须是通过 SQLite `.backup` 生成的独立快照，不能直接指向 `Application Support` 中的正式库。测试会再次复制到唯一临时 profile，并只修改该副本中的出版项目。
 
 兼容旧审校包可执行：
 

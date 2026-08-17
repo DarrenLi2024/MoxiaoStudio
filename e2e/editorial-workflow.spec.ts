@@ -114,9 +114,11 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
   mkdirSync(artifacts, { recursive: true });
   const output = join(artifacts, `publication-proof-${Date.now()}.pdf`);
   const epubOutput = join(artifacts, `publication-proof-${Date.now()}.epub`);
+  const illustration = join(artifacts, `publication-illustration-${Date.now()}.png`);
+  writeFileSync(illustration, Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64"));
   const application = await electron.launch({
     args: [resolve("apps/desktop/out/main/index.js")],
-    env: { ...process.env, MOXIAO_PROFILE: `publication-${process.pid}-${Date.now()}`, MOXIAO_THEME: "light", MOXIAO_E2E_PDF_PATH: output, MOXIAO_E2E_EPUB_PATH: epubOutput }
+    env: { ...process.env, MOXIAO_PROFILE: `publication-${process.pid}-${Date.now()}`, MOXIAO_THEME: "light", MOXIAO_E2E_PDF_PATH: output, MOXIAO_E2E_EPUB_PATH: epubOutput, MOXIAO_E2E_ASSET_PATH: illustration }
   });
 
   try {
@@ -125,7 +127,26 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
     await page.getByRole("button", { name: "出版", exact: true }).first().click();
     const dialog = page.getByRole("dialog", { name: "出版中心" });
     await expect(dialog).toBeVisible();
-    await expect(page.frameLocator('iframe[title="出版分页预览"]').getByText("春山小记")).toBeVisible();
+    await expect(page.frameLocator('iframe[title="出版分页预览"]').getByRole("heading", { name: "春山小记" })).toBeVisible();
+    await dialog.getByRole("button", { name: "编排" }).click();
+    await dialog.getByRole("button", { name: "意境", exact: true }).click();
+    await expect(dialog.getByText(/候选方案 · mood/u)).toBeVisible();
+    await dialog.getByRole("button", { name: "应用此顺序" }).click();
+    await dialog.getByRole("button", { name: "前置页" }).click();
+    await expect(dialog.getByLabel("版权所有者")).toBeVisible();
+    await dialog.getByLabel("前言确认状态").selectOption("confirmed");
+    await dialog.getByLabel("作者简介确认状态").selectOption("confirmed");
+    await dialog.getByRole("button", { name: "样式" }).click();
+    await dialog.getByRole("button", { name: /典藏书稿/u }).click();
+    await dialog.getByRole("button", { name: "5 插图", exact: true }).click();
+    await dialog.getByRole("button", { name: "为本篇添加插图" }).click();
+    const placement = dialog.locator(".placement-editor").first();
+    await placement.getByLabel("位置").selectOption("inline");
+    await placement.getByLabel("插入锚点").fill("松风过处");
+    await placement.getByLabel("替代文字").fill("春山意境插图");
+    await placement.getByLabel("使用权").selectOption("owned");
+    await expect(page.frameLocator('iframe[title="出版分页预览"]').getByAltText("春山意境插图")).toBeVisible();
+    await dialog.getByRole("button", { name: "6 导出", exact: true }).click();
     const watermark = dialog.getByRole("group", { name: "水印" });
     await watermark.getByLabel("启用").check();
     await watermark.getByLabel("文字").fill("内部送审 · 禁止外传");
@@ -162,6 +183,16 @@ test("笺读编校在窄屏深色与减弱动态效果下保持可用", async ()
     await expect(page.getByLabel("今译")).toBeVisible();
     await expect(page.getByText("正文参照", { exact: true })).toBeVisible();
     await page.screenshot({ path: join(artifacts, "reading-editor-dark-narrow.png"), fullPage: true });
+    await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1.15));
+    await page.getByRole("button", { name: "出版", exact: true }).first().click();
+    const publication = page.getByRole("dialog", { name: "出版中心" });
+    await expect(publication).toBeVisible();
+    await publication.getByRole("button", { name: "4 样式", exact: true }).click();
+    await expect(publication.getByRole("button", { name: /素笺雅集/u })).toBeVisible();
+    await expect(publication.getByRole("group", { name: "前置页与出版事实" })).toBeHidden();
+    await expect(publication.getByRole("group", { name: "语义样式系统" })).toBeVisible();
+    expect(await publication.locator(".publication-controls").evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: join(artifacts, "publication-dark-narrow-large.png"), fullPage: true });
   } finally {
     await application.close();
   }

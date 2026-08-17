@@ -30,6 +30,7 @@ import {
   validatePublication,
   validatePublicationProfile,
   validatePublicationProject,
+  type ArrangementProposal,
   type PublicationAsset,
   type PublicationProject
 } from "@moxiao/publication";
@@ -37,8 +38,10 @@ import { createEntityId } from "@moxiao/domain";
 import {
   LOCAL_PUBLICATION_PROJECT_ID,
   createDefaultPublicationProject,
+  generateFrontMatter,
   publicationAssets,
   publicationDocument,
+  proposeArrangement,
   synchronizePublicationProject,
   targetPackage
 } from "./publication-workflow";
@@ -113,7 +116,7 @@ function loadPublicationProject(projectId: string = LOCAL_PUBLICATION_PROJECT_ID
   const workspace = loadWorkspace();
   const stored = activeStore().loadPublicationProject<PublicationProject>(WORKSPACE_ID, projectId);
   const project = synchronizePublicationProject(stored ? validatePublicationProject(stored) : createDefaultPublicationProject(workspace), workspace);
-  if (!stored || stableStringify(project.entries) !== stableStringify(stored.entries)) activeStore().savePublicationProject(WORKSPACE_ID, project.id, project);
+  if (!stored || stableStringify(project) !== stableStringify(stored)) activeStore().savePublicationProject(WORKSPACE_ID, project.id, project);
   return project;
 }
 
@@ -148,7 +151,24 @@ function publicationPreview(projectValue?: unknown): {
   const assets = publicationAssets(project);
   const document = publicationDocument(loadWorkspace(), project);
   const capabilities = project.target === "pdf" ? chromiumRendererCapabilities : project.target === "epub" ? epubRendererCapabilities : contentPackageRendererCapabilities;
-  return { project, document, html: renderPublicationHtml(document, project.profile, assets), preflight: validatePublication(document, project.profile, capabilities, assets), capabilities };
+  const basePreflight = validatePublication(document, project.profile, capabilities, assets);
+  const issues = [...basePreflight.issues];
+  if (!document.sections.some((section) => section.role === "body")) issues.push({ severity: "error" as const, code: "document.body.empty", message: "当前筛选条件下没有可出版篇目" });
+  if (project.frontMatter.includeCopyright && !project.frontMatter.copyright.rightsHolder.trim()) issues.push({ severity: "error" as const, code: "copyright.holder.required", message: "版权页尚未填写版权所有者" });
+  const publicRelease = project.frontMatter.copyright.publicationType !== "private";
+  if (project.frontMatter.copyright.publicationType === "publisher" && !project.frontMatter.copyright.publisher.trim()) issues.push({ severity: "error" as const, code: "publisher.required", message: "出版社出版需填写出版社名称" });
+  if (project.frontMatter.includePreface && project.frontMatter.preface.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "preface.unconfirmed", message: "前言仍为待确认草稿" });
+  if (project.frontMatter.includeAuthorBio && project.frontMatter.author.biography.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "author-biography.unconfirmed", message: "作者简介仍为待确认草稿" });
+  const records = new Map(loadWorkspace().records.map((record) => [record.id, record]));
+  for (const placement of project.placements) {
+    const anchor = placement.anchorText?.trim();
+    if (placement.role !== "inline" || !anchor) continue;
+    const record = records.get(placement.recordId);
+    const body = record?.draft.work.prose?.trim() || record?.draft.work.lines.join("\n") || "";
+    if (!body.includes(anchor)) issues.push({ severity: "warning" as const, code: `illustration.anchor.missing.${placement.assetId}`, message: `${record?.draft.work.editorialTitle || record?.draft.work.title || "篇目"}的插图锚点未命中，将置于正文后` });
+  }
+  const preflight = { ok: issues.every((issue) => issue.severity !== "error"), issues };
+  return { project, document, html: renderPublicationHtml(document, project.profile, assets, project.theme), preflight, capabilities };
 }
 
 async function exportPublication(projectValue: unknown): Promise<unknown> {
@@ -243,12 +263,20 @@ function registerIpc(): void {
     return activeStore().savePublicationProject(WORKSPACE_ID, project.id, project);
   });
   ipcMain.handle("moxiao:publication:save-project", (_event, value: unknown) => savePublicationProject(value));
+  ipcMain.handle("moxiao:publication:generate-frontmatter", (_event, value: unknown) => savePublicationProject(generateFrontMatter(loadWorkspace(), validatePublicationProject(value))));
+  ipcMain.handle("moxiao:publication:propose-arrangement", (_event, value: unknown, strategy: ArrangementProposal["strategy"]) => {
+    if (!( ["genre", "chronology-asc", "chronology-desc", "mood", "hybrid"] as const).includes(strategy)) throw new Error("智能编排策略无效");
+    return proposeArrangement(loadWorkspace(), validatePublicationProject(value), strategy);
+  });
   ipcMain.handle("moxiao:publication:select-asset", async (_event, input: { kind: PublicationAsset["kind"]; attachedRecordId?: string }) => {
-    if (!input || !(["cover", "illustration", "font", "ornament"] as const).includes(input.kind)) throw new Error("资产类型无效");
+    if (!input || !(["cover", "illustration", "font", "ornament", "portrait"] as const).includes(input.kind)) throw new Error("资产类型无效");
     const filters = input.kind === "font" ? [{ name: "字体", extensions: ["otf", "ttf", "woff", "woff2"] }] : [{ name: "图像", extensions: ["png", "jpg", "jpeg", "webp"] }];
-    const selection = await dialog.showOpenDialog({ title: input.kind === "cover" ? "选择封面" : input.kind === "illustration" ? "选择插图" : "选择出版资产", properties: ["openFile"], filters });
-    if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
-    const filePath = selection.filePaths[0];
+    let filePath = process.env.MOXIAO_E2E_ASSET_PATH;
+    if (!filePath) {
+      const selection = await dialog.showOpenDialog({ title: input.kind === "cover" ? "选择封面" : input.kind === "illustration" ? "选择插图" : "选择出版资产", properties: ["openFile"], filters });
+      if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+      filePath = selection.filePaths[0];
+    }
     if (statSync(filePath).size > 12 * 1024 * 1024) throw new Error("单个出版资产超过 12 MB 安全上限");
     const extension = filePath.split(".").pop()?.toLocaleLowerCase() ?? "";
     const mediaType = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", otf: "font/otf", ttf: "font/ttf", woff: "font/woff", woff2: "font/woff2" } as Record<string, string>)[extension];

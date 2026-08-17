@@ -1,5 +1,19 @@
 # 发布就绪检查
 
+## 0.3.0 澄卷出版系统
+
+- `PublicationProject 1.1`、语义前置页、编校信息边界、四套主题、单篇媒体位置与可解释编排均已进入同一 Publication IR。
+- `pnpm check` 通过：7 个工作包类型检查、7 个测试文件共 37 项单元/集成测试和生产构建成功；真实 Electron E2E 4/4 通过。
+- 真实 Electron 小样已完成意境候选应用、前置页确认、典藏主题、随文锚点插图、A5 Tagged PDF 与 EPUB 3 导出；EPUBCheck 5.3.0 按 EPUB 3.3 验证为 0 fatal、0 error、0 warning。
+- PDF 小样为 10 页 A5、206,290 字节、Tagged、无 JavaScript；Poppler 抽样确认书名页、正文编号、插图、水印与页眉页脚。
+- 正式资料库只通过 SQLite 在线备份进入隔离 profile：228 篇现存作品完整导出为 471 页 A4 Tagged PDF，8,672,754 字节，SHA-256 为 `04b8312d041b87ef97b0d9036c61560286e1dd0305108808e1b38512f3f2601e`。正式库和原图库未被写入。
+- 正式库旧书稿保留了“七绝”筛选，首次只生成 79 页；全量测试显式切回全部体裁。旧插图缺少替代文字时新版预检正确阻止导出，隔离测试仅移除该摆放位置后完成全文验证。
+- 依赖高危漏洞审计为零，常见私钥和令牌模式扫描无命中。
+- 0.3.0 应用公证提交 `84f043c4-f73f-4799-9861-6beae8d8c2a3`、DMG 公证提交 `1fde774e-4ed2-4f95-b0d9-22d889855869` 均由 Apple 接受。
+- 最终 DMG 添加 `com.apple.quarantine` 后只读挂载；DMG 与包内应用 Gatekeeper、票据和深层签名通过，包内冷启动及真实 PDF 导出测试 1/1 通过。
+- 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.3.0-arm64.dmg`，119,373,128 字节，SHA-256：`f062731fe52f2640a04a8ed60a8a26387f14d6395e998b58e529c65da74b3104`；独立清单复核为 `OK`。
+- 待完成：提交推送与 GitHub `v0.3.0` 预发布资产核验。
+
 ## 0.2.2 大体量 PDF 导出热修
 
 - 根因确认：隐藏打印窗口将整卷出版 HTML 编码为 `data:` URL；生产书稿体量超过 Chromium URL 长度上限后触发 `ERR_INVALID_URL (-300)`，与作品数据、PDF 配置或保存状态无关。
