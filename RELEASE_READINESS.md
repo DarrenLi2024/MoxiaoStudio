@@ -1,5 +1,17 @@
 # 发布就绪检查
 
+## 0.3.1 精装电子书编排工作台
+
+- `PublicationProject 1.2`、14 类中文体裁事实源、体裁多选、动态排序/顺序固化、实时样式和三类电子书兼容配置已进入同一 Publication IR；旧 1.0/1.1 项目读取迁移通过。
+- `pnpm check` 通过：7 个工作包类型检查、7 个测试文件共 38 项单元/集成测试和生产构建成功；最终构建上的真实 Electron E2E 4/4 通过。
+- Electron 回归实际验证体裁多选、系年倒序、固化作者编定顺序、意境候选、前置页确认、当代主题实时左对齐、典藏主题、随文锚点插图、PDF 与 EPUB 导出，以及深色窄屏、115% 缩放和减弱动态效果。
+- EPUB 3.3 小样为 15,280 字节，SHA-256 `7efaf80bed80811784b632ded07fbc56c9881a5a0d180bbf1ad1f868a4f882e3`；EPUBCheck 5.3.0 按 EPUB 3.3 验证为 0 fatal、0 error、0 warning。
+- 正式 SQLite 只通过在线备份进入隔离 profile：228 篇现存作品完整导出为 490 页 A4 Tagged PDF，8,232,571 字节，SHA-256 `6b977f37540e2e6fdd503f23e2b5578dea4dc78d5e1c25936cc6a5c4c439e319`；正式库未被写入。
+- 生产依赖高危漏洞审计为零，常见私钥和令牌模式扫描无命中。
+- 0.3.1 应用公证提交 `ee1adc2f-13a2-44b2-90d4-83cfedcf7f18`、DMG 公证提交 `5547fd59-72d0-496a-8432-b29ff8d3fc20` 均由 Apple 接受。
+- 最终 DMG 副本添加 `com.apple.quarantine` 后只读挂载；DMG 与包内应用 Gatekeeper、票据和深层签名通过，包内冷启动及真实 PDF 导出测试 1/1 通过。
+- 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.3.1-arm64.dmg`，119,405,534 字节，SHA-256 `731721718ac673a2b54c00b90ffb74e1719992f9c2031f1b7d257d779d979600`；独立清单复核为 `OK`。
+
 ## 0.3.0 澄卷出版系统
 
 - `PublicationProject 1.1`、语义前置页、编校信息边界、四套主题、单篇媒体位置与可解释编排均已进入同一 Publication IR。
