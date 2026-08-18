@@ -34,7 +34,7 @@ pnpm dist:mac
 MOXIAO_SIGNING_IDENTITY="证书 SHA-1" pnpm dist:mac
 ```
 
-发布脚本会验证应用签名、团队 ID、安全时间戳和应用票据；随后使用同一 Developer ID 对 DMG 容器签名，再把签名后的最终字节提交公证、装订票据并执行 Gatekeeper 验收，最后生成独立 SHA-256 文件。DMG 必须遵循“签名 → 公证 → 装订”顺序，任一步失败都不得上传资产。
+发布脚本显式执行两阶段公证，不依赖 electron-builder 的隐式钥匙串读取：先生成并签名 `.app` 目录包，以 ZIP 提交 Apple，接受后为应用装订票据；再以已经装订的应用制作 DMG，使用同一 Developer ID 签名容器，把签名后的最终字节提交公证、装订票据并执行 Gatekeeper 验收，最后生成独立 SHA-256 文件。应用和 DMG 都必须遵循“签名 → 公证 → 装订”顺序，任一步失败都不得上传资产。
 
 ## 成品复验
 

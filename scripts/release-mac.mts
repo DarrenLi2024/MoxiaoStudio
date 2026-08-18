@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { spawnSync } from "node:child_process";
-import { readFileSync, writeFileSync } from "node:fs";
+import { readFileSync, rmSync, writeFileSync } from "node:fs";
 import { resolve } from "node:path";
 
 interface SigningIdentity {
@@ -46,6 +46,7 @@ const version = desktopPackage.version;
 const profile = process.env.MOXIAO_NOTARY_PROFILE?.trim() || "moxiao-notary";
 const identity = selectIdentity(signingIdentities());
 const appPath = resolve(root, "release/mac-arm64/墨校台文枢.app");
+const appZipPath = resolve(root, "release/墨校台文枢.zip");
 const dmgPath = resolve(root, `release/Moxiao-Studio-${version}-arm64.dmg`);
 const releaseEnv = { ...process.env, APPLE_KEYCHAIN_PROFILE: profile, CSC_NAME: identity.sha1 };
 
@@ -53,14 +54,24 @@ console.log(`签名身份：${identity.name} [${identity.sha1.slice(0, 10)}…]`
 console.log(`公证凭据：钥匙串配置 ${profile}`);
 capture("xcrun", ["notarytool", "history", "--keychain-profile", profile, "--output-format", "json"]);
 
-run("pnpm", ["--filter", "@moxiao/desktop", "run", "dist:mac:raw"], releaseEnv);
+run("pnpm", ["--filter", "@moxiao/desktop", "run", "pack:mac"], releaseEnv);
 
 const signature = capture("codesign", ["-dvv", appPath]);
 for (const required of ["Authority=Developer ID Application:", "TeamIdentifier=38J989274V", "Timestamp="]) {
   if (!signature.includes(required)) throw new Error(`应用签名缺少 ${required}`);
 }
 run("codesign", ["--verify", "--deep", "--strict", "--verbose=2", appPath]);
+rmSync(appZipPath, { force: true });
+run("ditto", ["-c", "-k", "--sequesterRsrc", "--keepParent", appPath, appZipPath]);
+const appSubmission = capture("xcrun", ["notarytool", "submit", appZipPath, "--keychain-profile", profile, "--wait", "--output-format", "json"]);
+const appResult = JSON.parse(appSubmission) as { id?: string; status?: string };
+if (appResult.status !== "Accepted") throw new Error(`应用公证未通过：${appSubmission}`);
+run("xcrun", ["stapler", "staple", appPath]);
 run("xcrun", ["stapler", "validate", appPath]);
+rmSync(appZipPath, { force: true });
+
+// 只有应用已经装订 Apple 票据后才制作 DMG，保证磁盘映像内部也是完整可离线验证的应用。
+run("pnpm", ["--filter", "@moxiao/desktop", "exec", "electron-builder", "--mac", "dmg", "--arm64", "--prepackaged", appPath, "--publish", "never"], releaseEnv);
 
 // electron-builder 会签名应用，但生成的 DMG 容器默认没有 Developer ID 签名。
 // 必须先签名 DMG，再把签名后的最终字节提交公证；否则 stapler 虽可验证，
@@ -85,4 +96,5 @@ const manifestPath = resolve(root, `release/Moxiao-Studio-${version}-arm64.sha25
 writeFileSync(manifestPath, `${digest}  Moxiao-Studio-${version}-arm64.dmg\n`, "utf8");
 console.log(`发布包已签名、公证并装订：${dmgPath}`);
 console.log(`SHA-256：${digest}`);
-console.log(`Apple 公证提交：${result.id ?? "未返回编号"}`);
+console.log(`应用公证提交：${appResult.id ?? "未返回编号"}`);
+console.log(`DMG 公证提交：${result.id ?? "未返回编号"}`);

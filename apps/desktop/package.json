@@ -54,7 +54,7 @@
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "forceCodeSigning": true,
-      "notarize": true,
+      "notarize": false,
       "minimumSystemVersion": "12.0",
       "target": ["dmg"]
     },
