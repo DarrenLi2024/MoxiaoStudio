@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createEntityId } from "@moxiao/domain";
-import { chromiumRendererCapabilities, createDefaultFrontMatter, createDefaultPublicationProfile, defaultTheme, electronPrintOptions, migratePublicationProject, preflightPublication, publicationThemes, renderEpub, renderPublicationHtml, validateEpubBytes, validatePdfBytes, validatePublication, validatePublicationProfile, validatePublicationProject, type PublicationDocument, type PublicationProfile, type PublicationProject, type RendererCapabilities } from "./index";
+import { chromiumRendererCapabilities, createDefaultFrontMatter, createDefaultPublicationProfile, defaultTheme, electronPrintOptions, literaryFormLabel, migratePublicationProject, preflightPublication, publicationThemes, renderEpub, renderPublicationHtml, validateEpubBytes, validatePdfBytes, validatePublication, validatePublicationProfile, validatePublicationProject, type PublicationDocument, type PublicationProfile, type PublicationProject, type RendererCapabilities } from "./index";
 
 const profile: PublicationProfile = {
   id: createEntityId(),
@@ -129,13 +129,13 @@ describe("出版能力预检", () => {
     expect(() => validatePublicationProfile({ ...valid, watermark: { ...valid.watermark, content: "字".repeat(501) } })).toThrow("过长");
   });
 
-  it("将 1.0 出版项目确定性迁移到 1.1 并默认隐藏编校信息", () => {
+  it("将 1.0 出版项目确定性迁移到 1.2 并迁移单体裁筛选", () => {
     const migrated = migratePublicationProject({
       format: "MOXIAO-PUBLICATION", version: "1.0", id: createEntityId(), title: "旧书稿", subtitle: "", creator: "作者", language: "zh-CN", description: "",
-      sortMode: "author-intent", genreFilter: "all", chronologyFilter: "all", entries: [], assets: [], theme: { ...defaultTheme, id: "elegant" },
+      sortMode: "author-intent", genreFilter: "ci", chronologyFilter: "all", entries: [], assets: [], theme: { ...defaultTheme, id: "elegant" },
       profile: createDefaultPublicationProfile(createEntityId()), target: "pdf", updatedAt: "2026-08-17T12:00:00.000Z"
     });
-    expect(migrated).toMatchObject({ version: "1.1", apparatusPolicy: "omit", placements: [], theme: { id: "qingjian" } });
+    expect(migrated).toMatchObject({ version: "1.2", genreFilters: ["ci"], ebookProfile: "universal", apparatusPolicy: "omit", placements: [], theme: { id: "qingjian" } });
     expect(migrated.frontMatter.includeCopyright).toBe(true);
   });
 
@@ -158,12 +158,21 @@ describe("出版能力预检", () => {
     expect(validatePublicationProject(project).target).toBe("epub");
     const bytes = renderEpub(document, project);
     expect(validateEpubBytes(bytes)).toMatchObject({ ok: true });
-    expect(new TextDecoder("latin1").decode(bytes)).toContain("EPUB/nav.xhtml");
+    const output = new TextDecoder("latin1").decode(bytes);
+    expect(output).toContain("EPUB/nav.xhtml");
+    expect(output).toContain('epub:type="bodymatter"');
+    expect(output).toContain('property="rendition:layout">reflowable');
+    expect(output).toContain('property="schema:accessMode">textual');
+  });
+
+  it("实际体裁代码全部显示中文且未知值不丢失", () => {
+    expect(["dayou", "zayan", "siyan", "teshu", "saoti"].map(literaryFormLabel)).toEqual(["打油诗", "杂言", "四言", "特殊体裁", "骚体"]);
+    expect(literaryFormLabel("custom-form")).toBe("custom-form");
   });
 
   it("简介为空时不生成违反 EPUB 3.3 约束的空 description", () => {
     const document: PublicationDocument = { id: createEntityId(), expressionId: createEntityId(), expressionHash: "sha256:empty", title: "无简介选集", language: "zh-CN", sections: [{ id: createEntityId(), role: "body", title: "篇一", blocks: [{ type: "paragraph", text: "正文" }] }] };
-    const project: PublicationProject = { format: "MOXIAO-PUBLICATION", version: "1.1", id: createEntityId(), title: "无简介选集", subtitle: "", creator: "", language: "zh-CN", description: "", sortMode: "author-intent", genreFilter: "all", chronologyFilter: "all", entries: [], assets: [], placements: [], frontMatter: createDefaultFrontMatter("", "2026"), apparatusPolicy: "omit", arrangement: { genreWeight: 1, chronologyWeight: 1, moodWeight: 1 }, theme: defaultTheme, profile: createDefaultPublicationProfile(createEntityId()), target: "epub", updatedAt: "2026-08-17T12:00:00.000Z" };
+    const project: PublicationProject = { format: "MOXIAO-PUBLICATION", version: "1.2", id: createEntityId(), title: "无简介选集", subtitle: "", creator: "", language: "zh-CN", description: "", sortMode: "author-intent", genreFilters: [], chronologyFilter: "all", entries: [], assets: [], placements: [], frontMatter: createDefaultFrontMatter("", "2026"), apparatusPolicy: "omit", arrangement: { genreWeight: 1, chronologyWeight: 1, moodWeight: 1 }, theme: defaultTheme, profile: createDefaultPublicationProfile(createEntityId()), target: "epub", ebookProfile: "universal", updatedAt: "2026-08-17T12:00:00.000Z" };
     const text = new TextDecoder("latin1").decode(renderEpub(document, project));
     expect(text).not.toContain("<dc:description></dc:description>");
   });

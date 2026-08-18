@@ -24,13 +24,13 @@ test("正式资料库隔离副本可完成整卷 PDF 出版", async () => {
     await expect(page.getByText(/2\d\d 篇 · 已删除/u).last()).toBeVisible();
     await page.evaluate(async () => {
       const project = await window.moxiao!.publicationProject();
-      await window.moxiao!.savePublicationProject({ ...project, genreFilter: "all", chronologyFilter: "all", placements: [] });
+      await window.moxiao!.savePublicationProject({ ...project, genreFilters: [], chronologyFilter: "all", placements: [] });
     });
     await page.getByRole("button", { name: "出版", exact: true }).first().click();
     const dialog = page.getByRole("dialog", { name: "出版中心" });
     await expect(dialog).toBeVisible({ timeout: 30_000 });
     await dialog.getByRole("button", { name: "2 编排", exact: true }).click();
-    await dialog.getByLabel("出版按体裁筛选").selectOption("all");
+    await expect(dialog.getByRole("group", { name: "出版按体裁多选" })).toBeVisible();
     await dialog.getByLabel("出版按系年筛选").selectOption("all");
     await dialog.getByRole("button", { name: "6 导出", exact: true }).click();
     const exportButton = dialog.getByRole("button", { name: "导出并验证 PDF" });

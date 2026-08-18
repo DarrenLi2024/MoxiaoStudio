@@ -9,6 +9,7 @@ export type ApparatusPolicy = "omit" | "backmatter" | "internal-proof";
 export type DraftStatus = "draft" | "confirmed";
 export type PublicationThemeId = "sujian" | "qingjian" | "contemporary" | "collector";
 export type IllustrationRole = "chapter-opening" | "inline" | "plate" | "endpiece";
+export type EbookCompatibilityProfile = "universal" | "apple-books" | "wechat-reading";
 
 export interface PublicationEntry {
   readonly recordId: string;
@@ -36,6 +37,8 @@ export interface PublicationAsset {
   readonly fontFamily?: string;
   readonly rights: AssetRights;
   readonly rightsNote?: string;
+  readonly pixelWidth?: number;
+  readonly pixelHeight?: number;
   /** @deprecated 1.0 兼容字段；迁移后由 placements 承担出版位置。 */
   readonly attachedRecordId?: string;
 }
@@ -99,6 +102,10 @@ export interface PublicationTheme {
   readonly translationStyle: "plain" | "rule" | "panel";
   readonly annotationStyle: "inline" | "list" | "panel";
   readonly appreciationStyle: "section" | "rule" | "panel";
+  readonly paragraphStyle: "first-line-indent" | "paragraph-space";
+  readonly chapterOpening: "classic" | "compact" | "full-page";
+  readonly verseAlignment: "center" | "left";
+  readonly contentWidthEm: number;
 }
 
 export interface ArrangementItem {
@@ -124,7 +131,7 @@ export interface ArrangementOptions {
 
 export interface PublicationProject {
   readonly format: "MOXIAO-PUBLICATION";
-  readonly version: "1.1";
+  readonly version: "1.2";
   readonly id: EntityId;
   readonly title: string;
   readonly subtitle: string;
@@ -132,7 +139,7 @@ export interface PublicationProject {
   readonly language: string;
   readonly description: string;
   readonly sortMode: PublicationSortMode;
-  readonly genreFilter: string;
+  readonly genreFilters: readonly string[];
   readonly chronologyFilter: "all" | "dated" | "undated";
   readonly entries: readonly PublicationEntry[];
   readonly assets: readonly PublicationAsset[];
@@ -143,6 +150,7 @@ export interface PublicationProject {
   readonly theme: PublicationTheme;
   readonly profile: PublicationProfile;
   readonly target: PublicationTarget;
+  readonly ebookProfile: EbookCompatibilityProfile;
   readonly updatedAt: string;
 }
 
@@ -150,22 +158,26 @@ export const publicationThemes: Readonly<Record<PublicationThemeId, PublicationT
   sujian: {
     id: "sujian", bodyFont: '"Songti SC", "STSong", serif', headingFont: '"Songti SC", "STSong", serif',
     baseFontPt: 11.5, lineHeight: 1.9, accentColor: "#315f4d", ornament: "rule", density: "balanced",
-    titleStyle: "centered", translationStyle: "plain", annotationStyle: "list", appreciationStyle: "section"
+    titleStyle: "centered", translationStyle: "plain", annotationStyle: "list", appreciationStyle: "section",
+    paragraphStyle: "first-line-indent", chapterOpening: "classic", verseAlignment: "center", contentWidthEm: 38
   },
   qingjian: {
     id: "qingjian", bodyFont: '"Songti SC", "STSong", serif', headingFont: '"Kaiti SC", "STKaiti", serif',
     baseFontPt: 11.5, lineHeight: 1.95, accentColor: "#376b57", ornament: "bamboo", density: "relaxed",
-    titleStyle: "centered", translationStyle: "rule", annotationStyle: "panel", appreciationStyle: "rule"
+    titleStyle: "centered", translationStyle: "rule", annotationStyle: "panel", appreciationStyle: "rule",
+    paragraphStyle: "first-line-indent", chapterOpening: "classic", verseAlignment: "center", contentWidthEm: 36
   },
   contemporary: {
     id: "contemporary", bodyFont: '"PingFang SC", "Microsoft YaHei", sans-serif', headingFont: '"Songti SC", "STSong", serif',
     baseFontPt: 11, lineHeight: 1.82, accentColor: "#42564d", ornament: "none", density: "balanced",
-    titleStyle: "left-modern", translationStyle: "panel", annotationStyle: "list", appreciationStyle: "panel"
+    titleStyle: "left-modern", translationStyle: "panel", annotationStyle: "list", appreciationStyle: "panel",
+    paragraphStyle: "paragraph-space", chapterOpening: "compact", verseAlignment: "left", contentWidthEm: 42
   },
   collector: {
     id: "collector", bodyFont: '"Songti SC", "STSong", serif', headingFont: '"Songti SC", "STSong", serif',
     baseFontPt: 11, lineHeight: 1.82, accentColor: "#6a4835", ornament: "cloud", density: "compact",
-    titleStyle: "numbered", translationStyle: "rule", annotationStyle: "inline", appreciationStyle: "section"
+    titleStyle: "numbered", translationStyle: "rule", annotationStyle: "inline", appreciationStyle: "section",
+    paragraphStyle: "first-line-indent", chapterOpening: "full-page", verseAlignment: "center", contentWidthEm: 36
   }
 };
 
@@ -196,7 +208,7 @@ export function migratePublicationProject(value: unknown): PublicationProject {
   if (!value || typeof value !== "object") throw new Error("出版项目不是对象");
   const raw = structuredClone(value) as Record<string, unknown>;
   const source = raw as unknown as Partial<PublicationProject>;
-  if (raw.format !== "MOXIAO-PUBLICATION" || (raw.version !== "1.0" && raw.version !== "1.1")) throw new Error("出版项目格式或版本不受支持");
+  if (raw.format !== "MOXIAO-PUBLICATION" || !(["1.0", "1.1", "1.2"] as const).includes(raw.version as "1.0")) throw new Error("出版项目格式或版本不受支持");
   const creator = typeof source.creator === "string" ? source.creator : "";
   const updatedYear = typeof source.updatedAt === "string" ? source.updatedAt.slice(0, 4) : "";
   const defaults = createDefaultFrontMatter(creator, /^\d{4}$/u.test(updatedYear) ? updatedYear : String(new Date().getFullYear()));
@@ -210,7 +222,11 @@ export function migratePublicationProject(value: unknown): PublicationProject {
   const incomingBiography = incomingAuthor?.biography as Partial<ConfirmableText> | undefined;
   const incomingPreface = incomingFront?.preface as Partial<ConfirmableText> | undefined;
   return {
-    ...(source as unknown as PublicationProject), version: "1.1", creator,
+    ...(source as unknown as PublicationProject), version: "1.2", creator,
+    genreFilters: Array.isArray(raw.genreFilters)
+      ? [...new Set(raw.genreFilters.filter((item): item is string => typeof item === "string" && item !== "all"))]
+      : typeof raw.genreFilter === "string" && raw.genreFilter !== "all" ? [raw.genreFilter] : [],
+    ebookProfile: (["universal", "apple-books", "wechat-reading"] as const).includes(raw.ebookProfile as EbookCompatibilityProfile) ? raw.ebookProfile as EbookCompatibilityProfile : "universal",
     entries: (Array.isArray(source.entries) ? source.entries : []).map((item) => {
       const entry = item as Partial<PublicationEntry>;
       return { ...entry, includeCompositionNote: entry.includeCompositionNote ?? true, includeTranslation: entry.includeTranslation ?? true, includeAnnotations: entry.includeAnnotations ?? true, includeAppreciation: entry.includeAppreciation ?? true, locked: entry.locked ?? false, moodTags: entry.moodTags ?? [], editorialRole: entry.editorialRole ?? "normal" } as PublicationEntry;
@@ -234,6 +250,8 @@ export function validatePublicationProject(value: unknown): PublicationProject {
   if (!project.title?.trim() || project.title.length > 300) throw new Error("出版项目必须有有效书名");
   if (!( ["author-intent", "chronology-asc", "chronology-desc", "genre", "mood", "hybrid"] as const).includes(project.sortMode)) throw new Error("出版排序方式无效");
   if (!( ["pdf", "epub", "xianxinzimo", "webpub"] as const).includes(project.target)) throw new Error("出版目标无效");
+  if (!( ["universal", "apple-books", "wechat-reading"] as const).includes(project.ebookProfile)) throw new Error("电子书兼容配置无效");
+  if (!Array.isArray(project.genreFilters) || project.genreFilters.some((form) => typeof form !== "string" || !form.trim() || form.length > 80)) throw new Error("体裁筛选条件无效");
   if (!( ["omit", "backmatter", "internal-proof"] as const).includes(project.apparatusPolicy)) throw new Error("编校信息出版策略无效");
   if (!Array.isArray(project.entries) || !Array.isArray(project.assets) || !Array.isArray(project.placements)) throw new Error("出版项目缺少篇目或资产清单");
   const recordIds = new Set<string>();
@@ -268,7 +286,7 @@ export function validatePublicationProject(value: unknown): PublicationProject {
   }
   if (!project.theme || !Object.hasOwn(publicationThemes, project.theme.id) || project.theme.baseFontPt < 7 || project.theme.baseFontPt > 36 || project.theme.lineHeight < 1 || project.theme.lineHeight > 3) throw new Error("出版主题参数无效");
   if (!/^#[0-9a-f]{6}$/iu.test(project.theme.accentColor) || [project.theme.bodyFont, project.theme.headingFont].some((font) => !font || font.length > 300 || /[{};]/u.test(font))) throw new Error("出版主题字体或颜色无效");
-  if (!( ["compact", "balanced", "relaxed"] as const).includes(project.theme.density) || !( ["centered", "left-modern", "numbered"] as const).includes(project.theme.titleStyle) || !( ["plain", "rule", "panel"] as const).includes(project.theme.translationStyle) || !( ["inline", "list", "panel"] as const).includes(project.theme.annotationStyle) || !( ["section", "rule", "panel"] as const).includes(project.theme.appreciationStyle)) throw new Error("出版主题语义样式无效");
+  if (!( ["compact", "balanced", "relaxed"] as const).includes(project.theme.density) || !( ["centered", "left-modern", "numbered"] as const).includes(project.theme.titleStyle) || !( ["plain", "rule", "panel"] as const).includes(project.theme.translationStyle) || !( ["inline", "list", "panel"] as const).includes(project.theme.annotationStyle) || !( ["section", "rule", "panel"] as const).includes(project.theme.appreciationStyle) || !( ["first-line-indent", "paragraph-space"] as const).includes(project.theme.paragraphStyle) || !( ["classic", "compact", "full-page"] as const).includes(project.theme.chapterOpening) || !( ["center", "left"] as const).includes(project.theme.verseAlignment) || project.theme.contentWidthEm < 24 || project.theme.contentWidthEm > 60) throw new Error("出版主题语义样式无效");
   if (!( ["private", "self-published", "publisher"] as const).includes(project.frontMatter.copyright.publicationType) || !( ["draft", "confirmed"] as const).includes(project.frontMatter.preface.status) || !( ["draft", "confirmed"] as const).includes(project.frontMatter.author.biography.status)) throw new Error("前置页状态无效");
   if (project.frontMatter.author.portraitAssetId && !project.assets.some((asset) => asset.id === project.frontMatter.author.portraitAssetId && asset.kind === "portrait")) throw new Error("作者照片引用无效");
   if ([project.arrangement.genreWeight, project.arrangement.chronologyWeight, project.arrangement.moodWeight].some((weight) => !Number.isFinite(weight) || weight < 0 || weight > 100)) throw new Error("智能编排权重无效");

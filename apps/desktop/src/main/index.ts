@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme } from "electron";
 import {
   compareDuplicatePair,
   createNewRecord,
@@ -23,6 +23,7 @@ import {
   contentPackageRendererCapabilities,
   electronPrintOptions,
   epubRendererCapabilities,
+  literaryFormLabels,
   renderEpub,
   renderPublicationHtml,
   validateEpubBytes,
@@ -47,17 +48,7 @@ import {
 } from "./publication-workflow";
 
 const WORKSPACE_ID = "local-main";
-const FORM_LABELS = {
-  qijue: "七绝",
-  wujue: "五绝",
-  qilv: "七律",
-  wulv: "五律",
-  ci: "词",
-  xinshi: "新诗",
-  sanwen: "散文",
-  suibi: "随笔",
-  duilian: "对联"
-} as const;
+const FORM_LABELS = literaryFormLabels;
 
 let store: WorkspaceStore | null = null;
 
@@ -151,7 +142,16 @@ function publicationPreview(projectValue?: unknown): {
   const assets = publicationAssets(project);
   const document = publicationDocument(loadWorkspace(), project);
   const capabilities = project.target === "pdf" ? chromiumRendererCapabilities : project.target === "epub" ? epubRendererCapabilities : contentPackageRendererCapabilities;
-  const basePreflight = validatePublication(document, project.profile, capabilities, assets);
+  const validationProfile = project.target === "pdf" ? project.profile : {
+    ...project.profile,
+    bleedMm: 0,
+    cropMarks: false,
+    mirrorMargins: false,
+    watermark: { ...project.profile.watermark, enabled: false },
+    runningContent: { ...project.profile.runningContent, enabled: false, differentOddEven: false },
+    pdfProfile: "screen" as const
+  };
+  const basePreflight = validatePublication(document, validationProfile, capabilities, assets);
   const issues = [...basePreflight.issues];
   if (!document.sections.some((section) => section.role === "body")) issues.push({ severity: "error" as const, code: "document.body.empty", message: "当前筛选条件下没有可出版篇目" });
   if (project.frontMatter.includeCopyright && !project.frontMatter.copyright.rightsHolder.trim()) issues.push({ severity: "error" as const, code: "copyright.holder.required", message: "版权页尚未填写版权所有者" });
@@ -159,6 +159,11 @@ function publicationPreview(projectValue?: unknown): {
   if (project.frontMatter.copyright.publicationType === "publisher" && !project.frontMatter.copyright.publisher.trim()) issues.push({ severity: "error" as const, code: "publisher.required", message: "出版社出版需填写出版社名称" });
   if (project.frontMatter.includePreface && project.frontMatter.preface.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "preface.unconfirmed", message: "前言仍为待确认草稿" });
   if (project.frontMatter.includeAuthorBio && project.frontMatter.author.biography.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "author-biography.unconfirmed", message: "作者简介仍为待确认草稿" });
+  if (project.target === "epub") {
+    const cover = project.assets.find((asset) => asset.kind === "cover");
+    if (!cover) issues.push({ severity: "warning" as const, code: "epub.cover.recommended", message: "电子书尚未设置封面；发行平台通常要求独立封面" });
+    if (project.ebookProfile === "apple-books" && cover?.pixelWidth && cover.pixelHeight && Math.min(cover.pixelWidth, cover.pixelHeight) < 1_400) issues.push({ severity: "warning" as const, code: "apple-books.cover.resolution", message: "Apple Books 封面短边建议至少 1400 像素" });
+  }
   const records = new Map(loadWorkspace().records.map((record) => [record.id, record]));
   for (const placement of project.placements) {
     const anchor = placement.anchorText?.trim();
@@ -283,7 +288,8 @@ function registerIpc(): void {
     if (!mediaType) throw new Error("不支持的出版资产格式");
     const bytes = readFileSync(filePath);
     const id = createEntityId();
-    return { canceled: false, asset: { id, kind: input.kind, fileName: filePath.split("/").pop()!, mediaType, dataUri: `data:${mediaType};base64,${bytes.toString("base64")}`, alt: "", rights: "unknown", ...(input.kind === "font" ? { fontFamily: `墨校字体-${id.slice(0, 8)}` } : {}), ...(input.attachedRecordId ? { attachedRecordId: input.attachedRecordId } : {}) } satisfies PublicationAsset };
+    const dimensions = input.kind === "font" ? undefined : nativeImage.createFromBuffer(bytes).getSize();
+    return { canceled: false, asset: { id, kind: input.kind, fileName: filePath.split("/").pop()!, mediaType, dataUri: `data:${mediaType};base64,${bytes.toString("base64")}`, alt: "", rights: "unknown", ...(dimensions?.width && dimensions.height ? { pixelWidth: dimensions.width, pixelHeight: dimensions.height } : {}), ...(input.kind === "font" ? { fontFamily: `墨校字体-${id.slice(0, 8)}` } : {}), ...(input.attachedRecordId ? { attachedRecordId: input.attachedRecordId } : {}) } satisfies PublicationAsset };
   });
 
   ipcMain.handle("moxiao:workspace:import", async () => {

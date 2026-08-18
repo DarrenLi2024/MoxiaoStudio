@@ -5,7 +5,9 @@ import {
   createArrangementProposal,
   createDefaultFrontMatter,
   createDefaultPublicationProfile,
+  compareLiteraryForms,
   defaultTheme,
+  literaryFormLabel,
   restoreArrangement,
   type ArrangementProposal,
   type PublicationAssetDeclaration,
@@ -38,8 +40,6 @@ function countText(value: string): number {
   const words = value.match(/[A-Za-z0-9]+(?:[-'][A-Za-z0-9]+)*/gu)?.length ?? 0;
   return han + words;
 }
-
-const genreNames: Readonly<Record<string, string>> = { qijue: "七绝", wujue: "五绝", qilv: "七律", wulv: "五律", ci: "词", xinshi: "新诗", sanwen: "散文", suibi: "随笔", duilian: "对联" };
 
 export function publicationStatistics(workspace: EditorialWorkspace, project: PublicationProject): NonNullable<PublicationDocument["statistics"]> {
   const selected = selectedPublicationRecords(workspace, project);
@@ -74,7 +74,7 @@ export function publicationStatistics(workspace: EditorialWorkspace, project: Pu
 
 export function generateFrontMatter(workspace: EditorialWorkspace, project: PublicationProject): PublicationProject {
   const statistics = publicationStatistics(workspace, project);
-  const genres = Object.entries(statistics.genreCounts).sort((left, right) => right[1] - left[1]).map(([form, count]) => `${genreNames[form] ?? form}${count}篇`).join("、");
+  const genres = Object.entries(statistics.genreCounts).sort((left, right) => right[1] - left[1]).map(([form, count]) => `${literaryFormLabel(form)}${count}篇`).join("、");
   const chronologyLabel = statistics.chronologyRange ? `创作时间自${statistics.chronologyRange[0]}年至${statistics.chronologyRange[1]}年` : "部分篇目尚待系年";
   const creator = project.creator.trim() || project.frontMatter.author.displayName.trim() || "作者";
   const preface = `本书收录作品${statistics.workCount}篇，正文约${statistics.bodyCharacters.toLocaleString("zh-CN")}字，体裁包括${genres || "多种文学样式"}。${chronologyLabel}。\n\n编选以作品本身的声息与作者确认的创作意图为中心，在体裁、系年与意境之间建立可阅读的次序。正文之外，酌收创作题注、今译、笺注与赏析，使写作现场、文本含义和后来的理解彼此照见。\n\n这是一本仍保留时间纹理的文集。愿读者循篇章而入，在山川、故园、行旅与人事之间，读见文字如何保存一段生命经验。`;
@@ -94,7 +94,7 @@ export function createDefaultPublicationProject(workspace: EditorialWorkspace, n
   const profile = createDefaultPublicationProfile(createEntityId(), "雅正文稿");
   const project: PublicationProject = {
     format: "MOXIAO-PUBLICATION",
-    version: "1.1",
+    version: "1.2",
     id,
     title: "本地文学项目",
     subtitle: "",
@@ -102,7 +102,7 @@ export function createDefaultPublicationProject(workspace: EditorialWorkspace, n
     language: "zh-CN",
     description: "",
     sortMode: "author-intent",
-    genreFilter: "all",
+    genreFilters: [],
     chronologyFilter: "all",
     entries: workspace.records.filter((record) => record.operation !== "delete").map(entry),
     assets: [],
@@ -113,6 +113,7 @@ export function createDefaultPublicationProject(workspace: EditorialWorkspace, n
     theme: defaultTheme,
     profile: { ...profile, ...defaultTheme, id: profile.id },
     target: "pdf",
+    ebookProfile: "universal",
     updatedAt: now
   };
   return generateFrontMatter(workspace, project);
@@ -140,13 +141,13 @@ export function selectedPublicationRecords(workspace: EditorialWorkspace, projec
   const selected = workspace.records.filter((record) => {
     const item = entries.get(record.id);
     if (record.operation === "delete" || !item?.included) return false;
-    if (project.genreFilter !== "all" && record.draft.work.form !== project.genreFilter) return false;
+    if (project.genreFilters.length && !project.genreFilters.includes(record.draft.work.form)) return false;
     const dated = chronology(record) !== null;
     return project.chronologyFilter === "all" || (project.chronologyFilter === "dated" ? dated : !dated);
   }).map((record) => ({ record, entry: entries.get(record.id)! }));
   return selected.sort((left, right) => {
     if (project.sortMode === "author-intent") return left.entry.manualOrder - right.entry.manualOrder;
-    if (project.sortMode === "genre") return left.record.draft.work.form.localeCompare(right.record.draft.work.form, "zh-CN") || left.entry.manualOrder - right.entry.manualOrder;
+    if (project.sortMode === "genre") return compareLiteraryForms(left.record.draft.work.form, right.record.draft.work.form) || left.entry.manualOrder - right.entry.manualOrder;
     if (project.sortMode === "mood" || project.sortMode === "hybrid") return (left.entry.moodTags[0] ?? "末").localeCompare(right.entry.moodTags[0] ?? "末", "zh-CN") || left.entry.manualOrder - right.entry.manualOrder;
     const a = chronology(left.record);
     const b = chronology(right.record);

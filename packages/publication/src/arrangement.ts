@@ -1,4 +1,5 @@
 import type { ArrangementProposal, PublicationProject } from "./project";
+import { literaryFormLabel, literaryFormOrder } from "./forms";
 
 export interface ArrangementSource {
   readonly recordId: string;
@@ -22,7 +23,7 @@ const moodLexicon = [
 ] as const;
 
 const moodOrder: ReadonlyMap<string, number> = new Map(moodLexicon.map(([tag], index) => [tag, index]));
-const genreOrder = new Map(["qijue", "wujue", "qilv", "wulv", "ci", "xinshi", "sanwen", "suibi", "duilian"].map((form, index) => [form, index]));
+const genreOrder: ReadonlyMap<string, number> = new Map(literaryFormOrder.map((form, index) => [form, index]));
 
 export function inferMoodTags(text: string): string[] {
   const ranked = moodLexicon.map(([tag, words], index) => ({ tag, index, score: words.filter((word) => text.includes(word)).length }))
@@ -37,7 +38,7 @@ function withMood(source: ArrangementSource): ArrangementSource & { resolvedMood
 
 function reason(source: ReturnType<typeof withMood>, strategy: ArrangementProposal["strategy"]): string {
   const mood = source.resolvedMoodTags.join("、") || "未识别明确意境";
-  if (strategy === "genre") return `按体裁归入 ${source.form}，同体裁内保持作者编定次序`;
+  if (strategy === "genre") return `按体裁归入${literaryFormLabel(source.form)}，同体裁内保持作者编定次序`;
   if (strategy.startsWith("chronology")) return source.year === null ? "尚未系年，置于已系年作品之后" : `按创作系年 ${source.year} 年编排`;
   if (strategy === "mood") return `依据正文意象归入“${mood}”的情绪序列`;
   return `综合体裁、${source.year === null ? "未系年状态" : `${source.year}年系年`}与“${mood}”意境编排`;

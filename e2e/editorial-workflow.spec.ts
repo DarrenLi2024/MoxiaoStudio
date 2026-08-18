@@ -129,6 +129,16 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
     await expect(dialog).toBeVisible();
     await expect(page.frameLocator('iframe[title="出版分页预览"]').getByRole("heading", { name: "春山小记" })).toBeVisible();
     await dialog.getByRole("button", { name: "编排" }).click();
+    const genreGroup = dialog.getByRole("group", { name: "出版按体裁多选" });
+    await expect(genreGroup.getByRole("button")).toHaveCount(5);
+    const qijueGenre = genreGroup.getByRole("button", { name: /七绝/u });
+    await qijueGenre.click();
+    await expect(qijueGenre).toHaveAttribute("aria-pressed", "false");
+    await qijueGenre.click();
+    await dialog.getByLabel("出版排序方式").selectOption("chronology-desc");
+    await expect(dialog.locator(".publication-selection-list .publication-entry strong").first()).toContainText("临江仙·秋思");
+    await dialog.getByRole("button", { name: "固化当前顺序" }).click();
+    await expect(dialog.getByLabel("出版排序方式")).toHaveValue("author-intent");
     await dialog.getByRole("button", { name: "意境", exact: true }).click();
     await expect(dialog.getByText(/候选方案 · mood/u)).toBeVisible();
     await dialog.getByRole("button", { name: "应用此顺序" }).click();
@@ -137,6 +147,8 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
     await dialog.getByLabel("前言确认状态").selectOption("confirmed");
     await dialog.getByLabel("作者简介确认状态").selectOption("confirmed");
     await dialog.getByRole("button", { name: "样式" }).click();
+    await dialog.getByRole("button", { name: /当代清集/u }).click();
+    await expect(page.frameLocator('iframe[title="出版分页预览"]').getByRole("heading", { name: "春山小记" })).toHaveCSS("text-align", "start");
     await dialog.getByRole("button", { name: /典藏书稿/u }).click();
     await dialog.getByRole("button", { name: "5 插图", exact: true }).click();
     await dialog.getByRole("button", { name: "为本篇添加插图" }).click();

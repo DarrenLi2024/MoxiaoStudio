@@ -13,7 +13,7 @@ describe("出版项目编选", () => {
     const project = { ...createDefaultPublicationProject(workspace), sortMode: "chronology-asc" as const };
     expect(selectedPublicationRecords(workspace, project).map(({ record }) => record.id)).toEqual([earlier.id, later.id]);
     expect(workspace.records.map((record) => record.draft.work.seq)).toEqual([1, 2]);
-    const filtered = { ...project, genreFilter: "ci" };
+    const filtered = { ...project, genreFilters: ["ci"] };
     expect(publicationDocument(workspace, filtered).sections.filter((section) => section.semanticRole === "chapter").map((section) => section.title)).toEqual(["后作"]);
   });
 
