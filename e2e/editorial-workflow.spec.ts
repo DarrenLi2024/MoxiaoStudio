@@ -151,8 +151,16 @@ test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
     await dialog.getByLabel("前言确认状态").selectOption("confirmed");
     await dialog.getByLabel("作者简介确认状态").selectOption("confirmed");
     await dialog.getByRole("button", { name: "样式" }).click();
+    const verse = previewFrame.locator(".verse").first();
+    const headingSize = await previewHeading.evaluate((element) => getComputedStyle(element).fontSize);
+    await dialog.getByLabel("诗词正文字号").fill("16");
+    await expect.poll(() => verse.evaluate((element) => Number.parseFloat(getComputedStyle(element).fontSize))).toBeGreaterThan(20);
+    await expect.poll(() => previewHeading.evaluate((element) => getComputedStyle(element).fontSize)).toBe(headingSize);
+    await dialog.getByLabel("诗词正文行距").fill("2.25");
+    await dialog.getByRole("button", { name: "锁定行距" }).click();
     await dialog.getByRole("button", { name: /当代清集/u }).click();
     await expect(previewHeading).toHaveCSS("text-align", "left");
+    await expect(dialog.getByLabel("诗词正文行距")).toHaveValue("2.25");
     await dialog.getByRole("button", { name: /典藏书稿/u }).click();
     await dialog.getByRole("button", { name: "5 插图", exact: true }).click();
     await dialog.getByRole("button", { name: "为本篇添加插图" }).click();
@@ -208,7 +216,7 @@ test("笺读编校在窄屏深色与减弱动态效果下保持可用", async ()
     await publication.getByRole("button", { name: "4 样式", exact: true }).click();
     await expect(publication.getByRole("button", { name: /素笺雅集/u })).toBeVisible();
     await expect(publication.getByRole("group", { name: "前置页与出版事实" })).toBeHidden();
-    await expect(publication.getByRole("group", { name: "语义样式系统" })).toBeVisible();
+    await expect(publication.getByRole("group", { name: "版式工坊" })).toBeVisible();
     expect(await publication.locator(".publication-controls").evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
     await page.screenshot({ path: join(artifacts, "publication-dark-narrow-large.png"), fullPage: true });
   } finally {

@@ -1,5 +1,6 @@
 import type { ContentHash, EntityId } from "@moxiao/domain";
 import type { PublicationTheme } from "./project";
+import { createStyleSheetFromTheme, resolveSemanticStyle, semanticStyleRoles, type LayoutSpecification, type PublicationStyleSheet, type SemanticStyleRole, type StyleProperties } from "./styles";
 
 export interface PublicationStatistics {
   readonly workCount: number;
@@ -236,18 +237,70 @@ function focalClass(point: readonly [number, number]): string {
   return `focal-${Math.round(point[0] * 10_000)}-${Math.round(point[1] * 10_000)}`;
 }
 
-function blockHtml(block: PublicationBlock, assets: ReadonlyMap<string, PublicationAssetDeclaration>): string {
-  if (block.type === "heading") return `<h${block.level} class="block-${block.semanticRole ?? "heading"}">${escapeHtml(block.text)}</h${block.level}>`;
-  if (block.type === "paragraph") return `<p class="block-${block.semanticRole ?? "body"}">${escapeHtml(block.text).replaceAll("\n", "<br>")}</p>`;
-  if (block.type === "verse") return `<div class="verse">${block.lines.map((line) => `<p>${escapeHtml(line) || "&nbsp;"}</p>`).join("")}</div>`;
-  if (block.type === "annotation") return `<aside class="annotation annotation-${block.semanticRole ?? "annotation"}"><b>${escapeHtml(block.marker)}</b>${escapeHtml(block.text)}</aside>`;
-  if (block.type === "toc") return `<nav class="book-toc" aria-label="目录"><ol>${block.entries.map((entry) => `<li>${entry.group ? `<span>${escapeHtml(entry.group)}</span>` : ""}<a href="#section-${entry.targetId}">${escapeHtml(entry.title)}</a></li>`).join("")}</ol></nav>`;
-  const asset = assets.get(block.assetId);
-  const focal = block.focalPoint ?? [0.5, 0.5];
-  return `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"} ${focalClass(focal)}" data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
+function paragraphStyleRole(role: Extract<PublicationBlock, { type: "paragraph" }>["semanticRole"]): SemanticStyleRole {
+  if (role === "translation") return "translation-body";
+  if (role === "appreciation") return "appreciation-body";
+  if (role === "copyright") return "copyright";
+  if (role === "foreword") return "foreword";
+  if (role === "author-bio") return "author-bio";
+  if (role === "apparatus") return "apparatus";
+  return "prose-body";
 }
 
-export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile, assetList: readonly PublicationAssetDeclaration[] = [], theme?: PublicationTheme): string {
+function headingStyleRole(role: Extract<PublicationBlock, { type: "heading" }>["semanticRole"]): SemanticStyleRole {
+  if (role === "translation") return "translation-title";
+  if (role === "appreciation") return "appreciation-title";
+  if (role === "apparatus") return "apparatus";
+  return "chapter-title";
+}
+
+function sectionTitleStyleRole(role: PublicationSection["semanticRole"]): SemanticStyleRole {
+  if (role === "cover" || role === "title-page") return "book-title";
+  if (role === "copyright") return "copyright";
+  if (role === "foreword") return "chapter-title";
+  if (role === "author-bio") return "chapter-title";
+  if (role === "apparatus") return "apparatus";
+  return "chapter-title";
+}
+
+function blockHtml(block: PublicationBlock, assets: ReadonlyMap<string, PublicationAssetDeclaration>): string {
+  if (block.type === "heading") return `<h${block.level} class="block-${block.semanticRole ?? "heading"} style-${headingStyleRole(block.semanticRole)}">${escapeHtml(block.text)}</h${block.level}>`;
+  if (block.type === "paragraph") return `<p class="block-${block.semanticRole ?? "body"} style-${paragraphStyleRole(block.semanticRole)}">${escapeHtml(block.text).replaceAll("\n", "<br>")}</p>`;
+  if (block.type === "verse") return `<div class="verse style-verse-body">${block.lines.map((line) => `<p>${escapeHtml(line) || "&nbsp;"}</p>`).join("")}</div>`;
+  if (block.type === "annotation") return `<aside class="annotation annotation-${block.semanticRole ?? "annotation"} style-${block.semanticRole === "composition-note" ? "composition-note" : "annotation-body"}"><b class="style-annotation-marker">${escapeHtml(block.marker)}</b>${escapeHtml(block.text)}</aside>`;
+  if (block.type === "toc") return `<nav class="book-toc" aria-label="目录"><ol>${block.entries.map((entry) => `<li class="style-toc-entry">${entry.group ? `<span>${escapeHtml(entry.group)}</span>` : ""}<a href="#section-${entry.targetId}">${escapeHtml(entry.title)}</a></li>`).join("")}</ol></nav>`;
+  const asset = assets.get(block.assetId);
+  const focal = block.focalPoint ?? [0.5, 0.5];
+  return `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"} ${focalClass(focal)}" data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption class="style-caption">${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
+}
+
+function stylePropertiesCss(properties: StyleProperties): string {
+  const declarations: string[] = [];
+  if (properties.fontFamily !== undefined) declarations.push(`font-family:${properties.fontFamily}`);
+  if (properties.fontSizePt !== undefined) declarations.push(`font-size:${properties.fontSizePt}pt`);
+  if (properties.fontWeight !== undefined) declarations.push(`font-weight:${properties.fontWeight}`);
+  if (properties.lineHeight !== undefined) declarations.push(`line-height:${properties.lineHeight}`);
+  if (properties.letterSpacingEm !== undefined) declarations.push(`letter-spacing:${properties.letterSpacingEm}em`);
+  if (properties.color !== undefined) declarations.push(`color:${properties.color}`);
+  if (properties.textAlign !== undefined) declarations.push(`text-align:${properties.textAlign}`);
+  if (properties.textIndentEm !== undefined) declarations.push(`text-indent:${properties.textIndentEm}em`);
+  if (properties.spaceBeforeEm !== undefined) declarations.push(`margin-block-start:${properties.spaceBeforeEm}em`);
+  if (properties.spaceAfterEm !== undefined) declarations.push(`margin-block-end:${properties.spaceAfterEm}em`);
+  if (properties.underline) declarations.push("text-decoration:underline");
+  if (properties.ruleAbove) declarations.push("border-block-start:1px solid currentColor");
+  if (properties.ruleBelow) declarations.push("border-block-end:1px solid currentColor");
+  if (properties.border) declarations.push("border:1px solid currentColor");
+  if (properties.backgroundColor !== undefined) declarations.push(`background-color:${properties.backgroundColor}`);
+  if (properties.borderRadiusPt !== undefined) declarations.push(`border-radius:${properties.borderRadiusPt}pt`);
+  if (properties.paddingEm !== undefined) declarations.push(`padding:${properties.paddingEm}em`);
+  return declarations.join(";");
+}
+
+function semanticStyleCss(sheet: PublicationStyleSheet, target: "pdf" | "epub" = "pdf"): string {
+  return semanticStyleRoles.map((role) => `.style-${role}{${stylePropertiesCss(resolveSemanticStyle(sheet, role, target))}}`).join("");
+}
+
+export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile, assetList: readonly PublicationAssetDeclaration[] = [], theme?: PublicationTheme, styleSheet?: PublicationStyleSheet, layoutSpecification?: LayoutSpecification): string {
   const margins = profile.marginsMm ?? { top: 22, right: 19, bottom: 22, left: 19 };
   const watermark = profile.watermark.enabled && profile.watermark.kind === "text"
     ? `<div class="watermark watermark-${profile.watermark.placement}">${escapeHtml(profile.watermark.content)}</div>`
@@ -255,6 +308,8 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
   const header = profile.runningContent.enabled ? runningTemplateCss(profile.runningContent.headerTemplate, document.title) : "none";
   const footer = profile.runningContent.enabled ? runningTemplateCss(profile.runningContent.footerTemplate, document.title) : "none";
   const assets = new Map(assetList.map((asset) => [asset.id, asset]));
+  const resolvedTheme = theme ?? { id: "sujian", bodyFont: profile.bodyFont ?? '"Songti SC","STSong",serif', headingFont: profile.headingFont ?? profile.bodyFont ?? '"Songti SC","STSong",serif', baseFontPt: profile.baseFontPt ?? 11.5, lineHeight: profile.lineHeight ?? 1.9, accentColor: profile.accentColor ?? "#315f4d", ornament: profile.ornament ?? "rule", density: "balanced", titleStyle: "centered", translationStyle: "plain", annotationStyle: "list", appreciationStyle: "section", paragraphStyle: "first-line-indent", chapterOpening: "classic", verseAlignment: "center", contentWidthEm: 38 } satisfies PublicationTheme;
+  const resolvedStyleSheet = styleSheet ?? createStyleSheetFromTheme(resolvedTheme);
   const fontFaces = assetList.filter((asset) => asset.kind === "font" && asset.dataUri && asset.fontFamily).map((asset) => `@font-face{font-family:"${cssText(asset.fontFamily!)}";src:url("${cssText(asset.dataUri!)}") format("${asset.mediaType.includes("woff2") ? "woff2" : asset.mediaType.includes("woff") ? "woff" : asset.mediaType.includes("otf") ? "opentype" : "truetype"}");font-display:block}`).join("");
   const focalRules = [...new Map(document.sections.flatMap((section) => section.blocks).filter((block): block is Extract<PublicationBlock, { type: "image" }> => block.type === "image").map((block) => {
     const point = block.focalPoint ?? [0.5, 0.5];
@@ -263,7 +318,7 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
   let bodyIndex = 0;
   const sections = document.sections.map((section) => {
     const number = section.role === "body" ? ++bodyIndex : 0;
-    return `<section id="section-${section.id}" class="section section-${section.role} semantic-${section.semanticRole ?? "chapter"} opening-${theme?.chapterOpening ?? "classic"}">${section.title ? `<h1>${theme?.titleStyle === "numbered" && number ? `<span class="chapter-number">${String(number).padStart(2, "0")}</span>` : ""}${escapeHtml(section.title)}</h1>` : ""}${profile.ornament && profile.ornament !== "none" ? `<div class="ornament ornament-${profile.ornament}" aria-hidden="true">${profile.ornament === "cloud" ? "〜 ◇ 〜" : profile.ornament === "bamboo" ? "❦" : "◇"}</div>` : ""}${section.blocks.map((block) => blockHtml(block, assets)).join("")}</section>`;
+    return `<section id="section-${section.id}" class="section section-${section.role} semantic-${section.semanticRole ?? "chapter"} opening-${resolvedTheme.chapterOpening}">${section.title ? `<h1 class="style-${sectionTitleStyleRole(section.semanticRole)}">${resolvedTheme.titleStyle === "numbered" && number ? `<span class="chapter-number">${String(number).padStart(2, "0")}</span>` : ""}${escapeHtml(section.title)}</h1>` : ""}${profile.ornament && profile.ornament !== "none" ? `<div class="ornament ornament-${profile.ornament}" aria-hidden="true">${profile.ornament === "cloud" ? "〜 ◇ 〜" : profile.ornament === "bamboo" ? "❦" : "◇"}</div>` : ""}${section.blocks.map((block) => blockHtml(block, assets)).join("")}</section>`;
   }).join("");
   const watermarkPosition = profile.watermark.placement === "corner" ? "right:12mm;bottom:12mm" : "left:50%;top:50%;transform:translate(-50%,-50%) rotate(var(--watermark-rotation))";
   return `<!doctype html>
@@ -271,11 +326,13 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
 <style nonce="${PUBLICATION_STYLE_NONCE}">
 ${fontFaces}
 ${focalRules}
+${semanticStyleCss(resolvedStyleSheet)}
 :root{--watermark-opacity:${profile.watermark.opacity};--watermark-rotation:${profile.watermark.rotation}deg;--accent:${profile.accentColor ?? "#315f4d"}}
 @page{size:${pageDimensions(profile)};margin:${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;${profile.bleedMm ? `bleed:${profile.bleedMm}mm;` : ""}${profile.cropMarks ? "marks:crop cross;" : ""}@top-center{content:${header};font:9px system-ui;color:#7d837c}@bottom-center{content:${footer};font:9px system-ui;color:#7d837c}}
 @page:first{@top-center{content:${profile.runningContent.suppressOnFirstPage ? "none" : header}}}
-*{box-sizing:border-box}body{margin:0;color:#20241f;background:#fffef9;font-family:${profile.bodyFont ?? '"Songti SC","STSong","Noto Serif CJK SC",serif'};writing-mode:${profile.writingMode};font-size:${profile.baseFontPt ?? 11.5}pt;line-height:${profile.lineHeight ?? 1.9}}main{max-width:${theme?.contentWidthEm ?? 38}em;margin-inline:auto}.section{break-after:page}.section:last-child{break-after:auto}.section-body.opening-classic{padding-block-start:18mm}.section-body.opening-compact{padding-block-start:5mm}.section-body.opening-full-page{padding-block-start:42mm}h1,h2,h3{break-after:avoid;font-family:${profile.headingFont ?? profile.bodyFont ?? '"Songti SC","STSong",serif'};font-weight:600;letter-spacing:.08em;color:var(--accent)}h1{font-size:24pt;margin:0 0 6mm;text-align:${theme?.titleStyle === "left-modern" ? "left" : "center"}}.chapter-number{display:block;margin-bottom:2mm;font:9pt system-ui;letter-spacing:.18em;opacity:.6}.ornament{text-align:center;margin:0 0 12mm;color:var(--accent);opacity:.66}.ornament-rule{font-size:10pt;letter-spacing:.5em}.ornament-cloud,.ornament-bamboo{font-size:14pt}h2{font-size:18pt}h3{font-size:14pt}p{margin:0 0 ${theme?.paragraphStyle === "first-line-indent" ? "0" : theme?.density === "compact" ? "3mm" : theme?.density === "relaxed" ? "5mm" : "4mm"};orphans:3;widows:3}.block-body{text-indent:${theme?.paragraphStyle === "first-line-indent" ? "2em" : "0"}}.verse{margin:8mm 0;text-align:${theme?.verseAlignment ?? "center"};font-size:13pt;line-height:2;break-inside:avoid}.verse p{margin:0;text-indent:0}.annotation{margin:5mm 0;padding:${theme?.annotationStyle === "inline" ? "0" : "4mm"};break-inside:avoid;border-left:${theme?.annotationStyle === "list" ? "0" : `1.5px solid ${profile.accentColor ?? "#759486"}`};background:${theme?.annotationStyle === "panel" ? "#f5f7f3" : "transparent"};color:#505851}.annotation b{margin-right:2mm;color:var(--accent)}.block-translation{${theme?.translationStyle === "panel" ? "padding:4mm;background:#f5f7f3" : theme?.translationStyle === "rule" ? "padding-left:4mm;border-left:1px solid var(--accent)" : ""}}.block-appreciation{${theme?.appreciationStyle === "panel" ? "padding:4mm;background:#f7f5ef" : theme?.appreciationStyle === "rule" ? "padding-top:4mm;border-top:1px solid #d8d8d0" : ""}}.semantic-title-page,.semantic-copyright,.semantic-foreword,.semantic-author-bio{display:grid;align-content:center;min-height:160mm}.semantic-title-page{text-align:center}.semantic-copyright{align-content:end;font-size:9.5pt;line-height:1.7}.book-toc ol{margin:0;padding:0;list-style:none}.book-toc li{display:flex;gap:3mm;align-items:baseline;padding:2.2mm 0;border-bottom:1px dotted #c8cdc6}.book-toc li span{width:18mm;color:#7d837c;font-size:9pt}.book-toc a{color:inherit;text-decoration:none}.watermark{position:fixed;z-index:${profile.watermark.layer === "under-content" ? "-1" : "20"};${watermarkPosition};opacity:var(--watermark-opacity);color:#315f4d;font:600 25pt system-ui;white-space:nowrap;pointer-events:none}.watermark-tile{inset:0;transform:none;display:grid;place-items:center;background-image:repeating-linear-gradient(-28deg,transparent 0 46mm,rgba(49,95,77,.04) 46mm 48mm)}figure{text-align:center;break-inside:avoid}figure.align-left{text-align:left}figure.align-right{text-align:right}figure.image-small img{max-width:35%}figure.image-medium img{max-width:62%}figure.image-wide img{max-width:100%}figure.image-full-page{break-before:page;break-after:page}figure.image-full-page img{width:100%;height:160mm}figure img{max-height:170mm;object-fit:contain}.missing-image{display:grid;min-height:45mm;place-items:center;border:1px solid #dfe3dc;color:#969d96}figcaption{margin-top:2mm;font-size:9pt;color:#70776f}
-</style></head><body>${watermark}<main>${sections}</main></body></html>`;
+${layoutSpecification?.facingPages ? `@page:left{margin-left:${layoutSpecification.marginsMm.outside}mm;margin-right:${layoutSpecification.marginsMm.inside}mm}@page:right{margin-left:${layoutSpecification.marginsMm.inside}mm;margin-right:${layoutSpecification.marginsMm.outside}mm}` : ""}
+*{box-sizing:border-box}body{margin:0;background:#fffef9;writing-mode:${profile.writingMode}}main{max-width:${resolvedTheme.contentWidthEm}em;margin-inline:auto}.section{break-after:page}.section:last-child{break-after:auto}.section-body{column-count:${layoutSpecification?.columns ?? 1};column-gap:${layoutSpecification?.columnGapMm ?? 6}mm}.section-body>h1,.section-body>.ornament{column-span:all}.section-body.opening-classic{padding-block-start:18mm}.section-body.opening-compact{padding-block-start:5mm}.section-body.opening-full-page{padding-block-start:42mm}h1,h2,h3{break-after:avoid}.chapter-number{display:block;margin-bottom:2mm;font:9pt system-ui;letter-spacing:.18em;opacity:.6}.ornament{text-align:center;margin:0 0 12mm;color:var(--accent);opacity:.66}.ornament-rule{font-size:10pt;letter-spacing:.5em}.ornament-cloud,.ornament-bamboo{font-size:14pt}p{margin-inline:0;orphans:3;widows:3}.verse{break-inside:avoid}.verse p{margin:0;text-indent:0}.annotation{margin:5mm 0;break-inside:avoid}.annotation b{margin-right:2mm}.semantic-title-page,.semantic-copyright,.semantic-foreword,.semantic-author-bio{display:grid;align-content:center;min-height:160mm}.semantic-title-page{text-align:center}.semantic-copyright{align-content:end}.book-toc ol{margin:0;padding:0;list-style:none}.book-toc li{display:flex;gap:3mm;align-items:baseline}.book-toc li span{width:18mm;opacity:.75}.book-toc a{color:inherit;text-decoration:none}.watermark{position:fixed;z-index:${profile.watermark.layer === "under-content" ? "-1" : "20"};${watermarkPosition};opacity:var(--watermark-opacity);color:#315f4d;font:600 25pt system-ui;white-space:nowrap;pointer-events:none}.watermark-tile{inset:0;transform:none;display:grid;place-items:center;background-image:repeating-linear-gradient(-28deg,transparent 0 46mm,rgba(49,95,77,.04) 46mm 48mm)}figure{text-align:center;break-inside:avoid}figure.align-left{text-align:left}figure.align-right{text-align:right}figure.image-small img{max-width:35%}figure.image-medium img{max-width:62%}figure.image-wide img{max-width:100%}figure.image-full-page{break-before:page;break-after:page}figure.image-full-page img{width:100%;height:160mm}figure img{max-height:170mm;object-fit:contain}.missing-image{display:grid;min-height:45mm;place-items:center;border:1px solid #dfe3dc;color:#969d96}
+</style></head><body class="style-base">${watermark}<main>${sections}</main></body></html>`;
 }
 
 export function electronPrintOptions(profile: PublicationProfile): {
@@ -323,6 +380,7 @@ export interface PublicationAssetDeclaration {
 }
 
 export * from "./project";
+export * from "./styles";
 export * from "./epub";
 export * from "./arrangement";
 export * from "./forms";

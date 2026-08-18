@@ -4,7 +4,9 @@ import {
   applyArrangementProposal,
   createArrangementProposal,
   createDefaultFrontMatter,
+  createDefaultLayoutSpecification,
   createDefaultPublicationProfile,
+  createStyleSheetFromTheme,
   compareLiteraryForms,
   defaultTheme,
   literaryFormLabel,
@@ -94,7 +96,7 @@ export function createDefaultPublicationProject(workspace: EditorialWorkspace, n
   const profile = createDefaultPublicationProfile(createEntityId(), "雅正文稿");
   const project: PublicationProject = {
     format: "MOXIAO-PUBLICATION",
-    version: "1.2",
+    version: "1.3",
     id,
     title: "本地文学项目",
     subtitle: "",
@@ -111,6 +113,8 @@ export function createDefaultPublicationProject(workspace: EditorialWorkspace, n
     apparatusPolicy: "omit",
     arrangement: { genreWeight: 1, chronologyWeight: 1, moodWeight: 1 },
     theme: defaultTheme,
+    styleSheet: createStyleSheetFromTheme(defaultTheme),
+    layoutSpecification: createDefaultLayoutSpecification(profile.pageSize, profile.customPageSizeMm),
     profile: { ...profile, ...defaultTheme, id: profile.id },
     target: "pdf",
     ebookProfile: "universal",

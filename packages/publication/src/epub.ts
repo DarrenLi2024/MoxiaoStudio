@@ -1,4 +1,5 @@
 import type { PublicationAssetDeclaration, PublicationDocument, PublicationProject } from "./index";
+import { resolveSemanticStyle, semanticStyleRoles, type SemanticStyleRole, type StyleProperties } from "./styles";
 
 export interface EpubValidationResult {
   readonly ok: boolean;
@@ -55,30 +56,77 @@ function dataUriBytes(uri: string): Uint8Array | null {
   return Uint8Array.from(atob(match[2]), (character) => character.charCodeAt(0));
 }
 
+function epubParagraphRole(role: Extract<PublicationDocument["sections"][number]["blocks"][number], { type: "paragraph" }>["semanticRole"]): SemanticStyleRole {
+  if (role === "translation") return "translation-body";
+  if (role === "appreciation") return "appreciation-body";
+  if (role === "copyright") return "copyright";
+  if (role === "foreword") return "foreword";
+  if (role === "author-bio") return "author-bio";
+  if (role === "apparatus") return "apparatus";
+  return "prose-body";
+}
+
+function epubHeadingRole(role: Extract<PublicationDocument["sections"][number]["blocks"][number], { type: "heading" }>["semanticRole"]): SemanticStyleRole {
+  if (role === "translation") return "translation-title";
+  if (role === "appreciation") return "appreciation-title";
+  if (role === "apparatus") return "apparatus";
+  return "chapter-title";
+}
+
+function epubSectionTitleRole(role: PublicationDocument["sections"][number]["semanticRole"]): SemanticStyleRole {
+  if (role === "cover" || role === "title-page") return "book-title";
+  if (role === "copyright") return "copyright";
+  if (role === "apparatus") return "apparatus";
+  return "chapter-title";
+}
+
 function blockXhtml(block: PublicationDocument["sections"][number]["blocks"][number], assets: ReadonlyMap<string, PublicationAssetDeclaration>, targets: ReadonlyMap<string, string>): string {
-  if (block.type === "heading") return `<h${block.level} class="block-${block.semanticRole ?? "heading"}">${xml(block.text)}</h${block.level}>`;
-  if (block.type === "paragraph") return `<p class="block-${block.semanticRole ?? "body"}">${xml(block.text).replaceAll("\n", "<br/>")}</p>`;
-  if (block.type === "verse") return `<div class="verse">${block.lines.map((line) => `<p>${xml(line) || "&#160;"}</p>`).join("")}</div>`;
-  if (block.type === "annotation") return `<aside epub:type="note" class="annotation-${block.semanticRole ?? "annotation"}"><b>${xml(block.marker)}</b> ${xml(block.text)}</aside>`;
-  if (block.type === "toc") return `<nav class="book-toc"><ol>${block.entries.map((entry) => `<li>${entry.group ? `<span>${xml(entry.group)}</span>` : ""}<a href="${targets.get(entry.targetId) ?? "nav.xhtml"}">${xml(entry.title)}</a></li>`).join("")}</ol></nav>`;
+  if (block.type === "heading") return `<h${block.level} class="block-${block.semanticRole ?? "heading"} style-${epubHeadingRole(block.semanticRole)}">${xml(block.text)}</h${block.level}>`;
+  if (block.type === "paragraph") return `<p class="block-${block.semanticRole ?? "body"} style-${epubParagraphRole(block.semanticRole)}">${xml(block.text).replaceAll("\n", "<br/>")}</p>`;
+  if (block.type === "verse") return `<div class="verse style-verse-body">${block.lines.map((line) => `<p>${xml(line) || "&#160;"}</p>`).join("")}</div>`;
+  if (block.type === "annotation") return `<aside epub:type="note" class="annotation-${block.semanticRole ?? "annotation"} style-${block.semanticRole === "composition-note" ? "composition-note" : "annotation-body"}"><b class="style-annotation-marker">${xml(block.marker)}</b> ${xml(block.text)}</aside>`;
+  if (block.type === "toc") return `<nav class="book-toc"><ol>${block.entries.map((entry) => `<li class="style-toc-entry">${entry.group ? `<span>${xml(entry.group)}</span>` : ""}<a href="${targets.get(entry.targetId) ?? "nav.xhtml"}">${xml(entry.title)}</a></li>`).join("")}</ol></nav>`;
   const asset = assets.get(block.assetId);
   const focal = block.focalPoint ?? [0.5, 0.5];
-  return asset ? `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"}"><img src="assets/${xml(asset.fileName ?? `${block.assetId}.bin`)}" alt="${xml(block.alt)}" style="object-position:${focal[0] * 100}% ${focal[1] * 100}%"/>${block.caption ? `<figcaption>${xml(block.caption)}</figcaption>` : ""}</figure>` : "";
+  return asset ? `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"}"><img src="assets/${xml(asset.fileName ?? `${block.assetId}.bin`)}" alt="${xml(block.alt)}" style="object-position:${focal[0] * 100}% ${focal[1] * 100}%"/>${block.caption ? `<figcaption class="style-caption">${xml(block.caption)}</figcaption>` : ""}</figure>` : "";
+}
+
+function epubStyleCss(properties: StyleProperties, baseFontPt: number): string {
+  const declarations: string[] = [];
+  if (properties.fontFamily !== undefined) declarations.push(`font-family:${properties.fontFamily}`);
+  if (properties.fontSizePt !== undefined && properties.fontSizePt > 0) declarations.push(`font-size:${Number((properties.fontSizePt / baseFontPt).toFixed(4))}rem`);
+  if (properties.fontWeight !== undefined) declarations.push(`font-weight:${properties.fontWeight}`);
+  if (properties.lineHeight !== undefined) declarations.push(`line-height:${properties.lineHeight}`);
+  if (properties.letterSpacingEm !== undefined) declarations.push(`letter-spacing:${properties.letterSpacingEm}em`);
+  if (properties.color !== undefined) declarations.push(`color:${properties.color}`);
+  if (properties.textAlign !== undefined) declarations.push(`text-align:${properties.textAlign}`);
+  if (properties.textIndentEm !== undefined) declarations.push(`text-indent:${properties.textIndentEm}em`);
+  if (properties.spaceBeforeEm !== undefined) declarations.push(`margin-block-start:${properties.spaceBeforeEm}em`);
+  if (properties.spaceAfterEm !== undefined) declarations.push(`margin-block-end:${properties.spaceAfterEm}em`);
+  if (properties.underline) declarations.push("text-decoration:underline");
+  if (properties.ruleAbove) declarations.push("border-block-start:.08rem solid currentColor");
+  if (properties.ruleBelow) declarations.push("border-block-end:.06rem solid currentColor");
+  if (properties.border) declarations.push("border:.06rem solid currentColor");
+  if (properties.backgroundColor !== undefined) declarations.push(`background-color:${properties.backgroundColor}`);
+  if (properties.borderRadiusPt !== undefined) declarations.push(`border-radius:${Number((properties.borderRadiusPt / baseFontPt).toFixed(4))}rem`);
+  if (properties.paddingEm !== undefined) declarations.push(`padding:${properties.paddingEm}em`);
+  return declarations.join(";");
 }
 
 export function renderEpub(document: PublicationDocument, project: PublicationProject, assets: readonly PublicationAssetDeclaration[] = []): Uint8Array {
   const assetMap = new Map(assets.map((asset) => [asset.id, asset]));
   const sectionTargets = new Map(document.sections.map((section, index) => [section.id, `chapter-${index + 1}.xhtml`]));
   const fontFaces = assets.filter((asset) => asset.kind === "font" && asset.fontFamily).map((asset) => `@font-face{font-family:"${asset.fontFamily}";src:url("assets/${asset.fileName}")}`).join("");
-  const paragraphMargin = project.theme.paragraphStyle === "first-line-indent" ? "0" : project.theme.density === "compact" ? ".72rem" : project.theme.density === "relaxed" ? "1.18rem" : ".92rem";
   const chapterPadding = project.theme.chapterOpening === "full-page" ? "24vh" : project.theme.chapterOpening === "compact" ? "4vh" : "12vh";
-  const css = `${fontFaces}:root{--accent:${project.theme.accentColor}}html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0 5%;font-family:${project.theme.bodyFont};font-size:1em;line-height:${project.theme.lineHeight};color:inherit;background:transparent;hyphens:auto}section{max-width:${project.theme.contentWidthEm}em;margin-inline:auto}section[epub\\:type="chapter"]{padding-block-start:${chapterPadding}}h1,h2,h3{break-after:avoid;page-break-after:avoid;font-family:${project.theme.headingFont};color:var(--accent);font-weight:600;line-height:1.35}h1{margin-block:0 1.4em;text-align:${project.theme.titleStyle === "left-modern" ? "left" : "center"};font-size:1.7em}h2{margin-block:2em .8em;font-size:1.28em}p{margin-block:0 ${paragraphMargin};orphans:3;widows:3}.block-body{text-indent:${project.theme.paragraphStyle === "first-line-indent" ? "2em" : "0"}}.verse{margin-block:1.5em;text-align:${project.theme.verseAlignment};line-height:2;break-inside:avoid;page-break-inside:avoid}.verse p{margin:0;text-indent:0}aside{margin-block:1.2em;break-inside:avoid;page-break-inside:avoid;border-inline-start:.12rem solid var(--accent);padding:.6rem 1rem}.block-translation{${project.theme.translationStyle === "panel" ? "padding:1rem;border:.06rem solid currentColor" : project.theme.translationStyle === "rule" ? "padding-inline-start:1rem;border-inline-start:.08rem solid var(--accent)" : ""}}.block-appreciation{${project.theme.appreciationStyle === "panel" ? "padding:1rem;border:.06rem solid currentColor" : project.theme.appreciationStyle === "rule" ? "padding-block-start:1rem;border-block-start:.08rem solid currentColor" : ""}}.book-toc ol{padding:0;list-style:none}.book-toc li{display:flex;gap:1rem;padding:.45rem 0;border-block-end:1px dotted currentColor}.book-toc li span{opacity:.7}.book-toc a{color:inherit;text-decoration:none}figure{text-align:center;break-inside:avoid;page-break-inside:avoid}figure.align-left{text-align:left}figure.align-right{text-align:right}figure.image-small img{max-width:35%}figure.image-medium img{max-width:62%}figure.image-wide img{max-width:100%}figure.image-full-page{break-before:page;break-after:page;page-break-before:always;page-break-after:always}img{max-width:100%;height:auto;object-fit:contain}figcaption{font-size:.82em;opacity:.75}@media(prefers-color-scheme:dark){:root{--accent:#9bc4b1}}`;
+  const baseFontPt = resolveSemanticStyle(project.styleSheet, "base", "epub").fontSizePt ?? project.theme.baseFontPt;
+  const semanticCss = semanticStyleRoles.map((role) => `.style-${role}{${epubStyleCss(resolveSemanticStyle(project.styleSheet, role, "epub"), baseFontPt)}}`).join("");
+  const css = `${fontFaces}:root{--accent:${project.theme.accentColor}}html{-webkit-text-size-adjust:100%;text-size-adjust:100%}body{margin:0 5%;font-size:1em;background:transparent;hyphens:auto}section{max-width:${project.theme.contentWidthEm}em;margin-inline:auto}section[epub\\:type="chapter"]{padding-block-start:${chapterPadding}}h1,h2,h3{break-after:avoid;page-break-after:avoid}p{orphans:3;widows:3}.verse{break-inside:avoid;page-break-inside:avoid}.verse p{margin:0;text-indent:0}aside{margin-block:1.2em;break-inside:avoid;page-break-inside:avoid}.book-toc ol{padding:0;list-style:none}.book-toc li{display:flex;gap:1rem}.book-toc li span{opacity:.7}.book-toc a{color:inherit;text-decoration:none}figure{text-align:center;break-inside:avoid;page-break-inside:avoid}figure.align-left{text-align:left}figure.align-right{text-align:right}figure.image-small img{max-width:35%}figure.image-medium img{max-width:62%}figure.image-wide img{max-width:100%}figure.image-full-page{break-before:page;break-after:page;page-break-before:always;page-break-after:always}img{max-width:100%;height:auto;object-fit:contain}${semanticCss}@media(prefers-color-scheme:dark){:root{--accent:#9bc4b1}.style-base{color:inherit}}`;
   const chapters = document.sections.map((section, index) => ({
     id: `chapter-${index + 1}`,
     file: `chapter-${index + 1}.xhtml`,
     title: section.title || `第 ${index + 1} 篇`,
     semanticRole: section.semanticRole ?? "chapter",
-    text: `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${xml(document.language)}" lang="${xml(document.language)}" dir="ltr"><head><meta charset="utf-8"/><title>${xml(section.title || document.title)}</title><link rel="stylesheet" href="styles.css" type="text/css"/></head><body><section id="${section.id}" epub:type="${section.semanticRole === "copyright" ? "copyright-page" : section.semanticRole === "title-page" ? "titlepage" : section.semanticRole === "foreword" ? "foreword" : section.semanticRole === "toc" ? "toc" : section.semanticRole === "cover" ? "cover" : section.semanticRole === "author-bio" ? "contributors" : section.role === "backmatter" ? "appendix" : "chapter"}">${section.title ? `<h1>${xml(section.title)}</h1>` : ""}${section.blocks.map((block) => blockXhtml(block, assetMap, sectionTargets)).join("")}</section></body></html>`
+    text: `<?xml version="1.0" encoding="utf-8"?><html xmlns="http://www.w3.org/1999/xhtml" xmlns:epub="http://www.idpf.org/2007/ops" xml:lang="${xml(document.language)}" lang="${xml(document.language)}" dir="ltr"><head><meta charset="utf-8"/><title>${xml(section.title || document.title)}</title><link rel="stylesheet" href="styles.css" type="text/css"/></head><body class="style-base"><section id="${section.id}" epub:type="${section.semanticRole === "copyright" ? "copyright-page" : section.semanticRole === "title-page" ? "titlepage" : section.semanticRole === "foreword" ? "foreword" : section.semanticRole === "toc" ? "toc" : section.semanticRole === "cover" ? "cover" : section.semanticRole === "author-bio" ? "contributors" : section.role === "backmatter" ? "appendix" : "chapter"}">${section.title ? `<h1 class="style-${epubSectionTitleRole(section.semanticRole)}">${xml(section.title)}</h1>` : ""}${section.blocks.map((block) => blockXhtml(block, assetMap, sectionTargets)).join("")}</section></body></html>`
   }));
   const assetItems = assets.filter((asset) => asset.dataUri).map((asset, index) => `<item id="asset-${index + 1}" href="assets/${xml(asset.fileName ?? `${asset.id}.bin`)}" media-type="${xml(asset.mediaType)}"${asset.kind === "cover" ? ' properties="cover-image"' : ""}/>`).join("");
   const bodyChapters = chapters.filter((chapter) => chapter.semanticRole === "chapter");

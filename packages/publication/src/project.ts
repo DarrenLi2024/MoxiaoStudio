@@ -1,5 +1,6 @@
 import type { EntityId } from "@moxiao/domain";
 import type { PublicationProfile } from "./index";
+import { createDefaultLayoutSpecification, createStyleSheetFromTheme, validateLayoutSpecification, validatePublicationStyleSheet, type LayoutSpecification, type PublicationStyleSheet } from "./styles";
 
 export type PublicationSortMode = "author-intent" | "chronology-asc" | "chronology-desc" | "genre" | "mood" | "hybrid";
 export type PublicationTarget = "pdf" | "epub" | "xianxinzimo" | "webpub";
@@ -131,7 +132,7 @@ export interface ArrangementOptions {
 
 export interface PublicationProject {
   readonly format: "MOXIAO-PUBLICATION";
-  readonly version: "1.2";
+  readonly version: "1.3";
   readonly id: EntityId;
   readonly title: string;
   readonly subtitle: string;
@@ -148,6 +149,8 @@ export interface PublicationProject {
   readonly apparatusPolicy: ApparatusPolicy;
   readonly arrangement: ArrangementOptions;
   readonly theme: PublicationTheme;
+  readonly styleSheet: PublicationStyleSheet;
+  readonly layoutSpecification: LayoutSpecification;
   readonly profile: PublicationProfile;
   readonly target: PublicationTarget;
   readonly ebookProfile: EbookCompatibilityProfile;
@@ -208,7 +211,7 @@ export function migratePublicationProject(value: unknown): PublicationProject {
   if (!value || typeof value !== "object") throw new Error("出版项目不是对象");
   const raw = structuredClone(value) as Record<string, unknown>;
   const source = raw as unknown as Partial<PublicationProject>;
-  if (raw.format !== "MOXIAO-PUBLICATION" || !(["1.0", "1.1", "1.2"] as const).includes(raw.version as "1.0")) throw new Error("出版项目格式或版本不受支持");
+  if (raw.format !== "MOXIAO-PUBLICATION" || !(["1.0", "1.1", "1.2", "1.3"] as const).includes(raw.version as "1.0")) throw new Error("出版项目格式或版本不受支持");
   const creator = typeof source.creator === "string" ? source.creator : "";
   const updatedYear = typeof source.updatedAt === "string" ? source.updatedAt.slice(0, 4) : "";
   const defaults = createDefaultFrontMatter(creator, /^\d{4}$/u.test(updatedYear) ? updatedYear : String(new Date().getFullYear()));
@@ -221,8 +224,10 @@ export function migratePublicationProject(value: unknown): PublicationProject {
   const incomingAuthor = incomingFront?.author as Partial<AuthorProfile> | undefined;
   const incomingBiography = incomingAuthor?.biography as Partial<ConfirmableText> | undefined;
   const incomingPreface = incomingFront?.preface as Partial<ConfirmableText> | undefined;
+  const theme = migratedTheme(source.theme);
+  const profile = source.profile as PublicationProfile;
   return {
-    ...(source as unknown as PublicationProject), version: "1.2", creator,
+    ...(source as unknown as PublicationProject), version: "1.3", creator,
     genreFilters: Array.isArray(raw.genreFilters)
       ? [...new Set(raw.genreFilters.filter((item): item is string => typeof item === "string" && item !== "all"))]
       : typeof raw.genreFilter === "string" && raw.genreFilter !== "all" ? [raw.genreFilter] : [],
@@ -241,7 +246,9 @@ export function migratePublicationProject(value: unknown): PublicationProject {
       author: { ...defaults.author, ...incomingAuthor, biography: { ...defaults.author.biography, ...incomingBiography } }
     },
     arrangement: { genreWeight: 1, chronologyWeight: 1, moodWeight: 1, ...(source.arrangement ?? {}) },
-    theme: migratedTheme(source.theme)
+    theme,
+    styleSheet: source.styleSheet ?? createStyleSheetFromTheme(theme),
+    layoutSpecification: source.layoutSpecification ?? createDefaultLayoutSpecification(profile?.pageSize ?? "A5", profile?.customPageSizeMm)
   };
 }
 
@@ -287,6 +294,8 @@ export function validatePublicationProject(value: unknown): PublicationProject {
   if (!project.theme || !Object.hasOwn(publicationThemes, project.theme.id) || project.theme.baseFontPt < 7 || project.theme.baseFontPt > 36 || project.theme.lineHeight < 1 || project.theme.lineHeight > 3) throw new Error("出版主题参数无效");
   if (!/^#[0-9a-f]{6}$/iu.test(project.theme.accentColor) || [project.theme.bodyFont, project.theme.headingFont].some((font) => !font || font.length > 300 || /[{};]/u.test(font))) throw new Error("出版主题字体或颜色无效");
   if (!( ["compact", "balanced", "relaxed"] as const).includes(project.theme.density) || !( ["centered", "left-modern", "numbered"] as const).includes(project.theme.titleStyle) || !( ["plain", "rule", "panel"] as const).includes(project.theme.translationStyle) || !( ["inline", "list", "panel"] as const).includes(project.theme.annotationStyle) || !( ["section", "rule", "panel"] as const).includes(project.theme.appreciationStyle) || !( ["first-line-indent", "paragraph-space"] as const).includes(project.theme.paragraphStyle) || !( ["classic", "compact", "full-page"] as const).includes(project.theme.chapterOpening) || !( ["center", "left"] as const).includes(project.theme.verseAlignment) || project.theme.contentWidthEm < 24 || project.theme.contentWidthEm > 60) throw new Error("出版主题语义样式无效");
+  validatePublicationStyleSheet(project.styleSheet);
+  validateLayoutSpecification(project.layoutSpecification);
   if (!( ["private", "self-published", "publisher"] as const).includes(project.frontMatter.copyright.publicationType) || !( ["draft", "confirmed"] as const).includes(project.frontMatter.preface.status) || !( ["draft", "confirmed"] as const).includes(project.frontMatter.author.biography.status)) throw new Error("前置页状态无效");
   if (project.frontMatter.author.portraitAssetId && !project.assets.some((asset) => asset.id === project.frontMatter.author.portraitAssetId && asset.kind === "portrait")) throw new Error("作者照片引用无效");
   if ([project.arrangement.genreWeight, project.arrangement.chronologyWeight, project.arrangement.moodWeight].some((weight) => !Number.isFinite(weight) || weight < 0 || weight > 100)) throw new Error("智能编排权重无效");

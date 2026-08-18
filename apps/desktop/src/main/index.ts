@@ -163,6 +163,7 @@ function publicationPreview(projectValue?: unknown): {
     const cover = project.assets.find((asset) => asset.kind === "cover");
     if (!cover) issues.push({ severity: "warning" as const, code: "epub.cover.recommended", message: "电子书尚未设置封面；发行平台通常要求独立封面", fixStep: "media" as const });
     if (project.ebookProfile === "apple-books" && cover?.pixelWidth && cover.pixelHeight && Math.min(cover.pixelWidth, cover.pixelHeight) < 1_400) issues.push({ severity: "warning" as const, code: "apple-books.cover.resolution", message: "Apple Books 封面短边建议至少 1400 像素", assetId: cover.id, fixStep: "media" as const });
+    if (project.layoutSpecification.facingPages || project.layoutSpecification.columns > 1 || project.layoutSpecification.baselineGrid.enabled) issues.push({ severity: "warning" as const, code: "epub.layout.reflow-adaptation", message: "EPUB 为可重排版：对页、分栏与基线网格仅用于 PDF，电子书将保留语义样式并交由阅读器重排", fixStep: "style" as const });
   }
   const records = new Map(loadWorkspace().records.map((record) => [record.id, record]));
   for (const placement of project.placements) {
@@ -173,7 +174,7 @@ function publicationPreview(projectValue?: unknown): {
     if (!body.includes(anchor)) issues.push({ severity: "warning" as const, code: `illustration.anchor.missing.${placement.assetId}.${placement.recordId}`, message: `${record?.draft.work.editorialTitle || record?.draft.work.title || "篇目"}的插图锚点未命中，将置于正文后`, assetId: placement.assetId, fixStep: "media" as const });
   }
   const preflight = { ok: issues.every((issue) => issue.severity !== "error"), issues };
-  return { project, document, html: renderPublicationHtml(document, project.profile, assets, project.theme), preflight, capabilities };
+  return { project, document, html: renderPublicationHtml(document, project.profile, assets, project.theme, project.styleSheet, project.layoutSpecification), preflight, capabilities };
 }
 
 async function exportPublication(projectValue: unknown): Promise<unknown> {
