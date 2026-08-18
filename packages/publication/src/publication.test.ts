@@ -88,6 +88,8 @@ describe("出版能力预检", () => {
     expect(html).toContain('counter(page) " 页 · 共 " counter(pages)');
     expect(html).toContain("春风入砚池");
     expect(html).toContain("block-translation");
+    expect(html).toContain('<style nonce="moxiao-publication-preview">');
+    expect(html).toContain("style-src 'nonce-moxiao-publication-preview'");
     expect(electronPrintOptions(draft).pageSize).toBe("A5");
     expect(preflightPublication(draft, chromiumRendererCapabilities).ok).toBe(true);
   });
@@ -119,7 +121,21 @@ describe("出版能力预检", () => {
     };
     const result = validatePublication(document, createDefaultPublicationProfile(createEntityId()), chromiumRendererCapabilities);
     expect(result.ok).toBe(false);
-    expect(result.issues.map((issue) => issue.code)).toEqual(expect.arrayContaining(["image.alt.required", "asset.rights.unresolved", "text.replacement-character"]));
+    expect(result.issues.some((issue) => issue.code.startsWith("image.alt.required.") && issue.assetId === assetId && issue.fixStep === "media")).toBe(true);
+    expect(result.issues.some((issue) => issue.code.startsWith("asset.missing.") && issue.assetId === assetId && issue.fixStep === "media")).toBe(true);
+    expect(result.issues.map((issue) => issue.code)).toContain("text.replacement-character");
+  });
+
+  it("图片焦点通过受控样式类渲染，不产生会被 CSP 拦截的行内样式", () => {
+    const assetId = createEntityId();
+    const document: PublicationDocument = {
+      id: createEntityId(), expressionId: createEntityId(), expressionHash: "sha256:focal", title: "图册", language: "zh-CN",
+      sections: [{ id: createEntityId(), role: "body", title: "篇一", blocks: [{ type: "image", assetId, alt: "山水", focalPoint: [0.25, 0.75] }] }]
+    };
+    const html = renderPublicationHtml(document, createDefaultPublicationProfile(createEntityId()), [{ id: assetId, mediaType: "image/png", rights: "owned", dataUri: "data:image/png;base64,AA==" }]);
+    expect(html).toContain("focal-2500-7500");
+    expect(html).toContain(".focal-2500-7500 img{object-position:25% 75%}");
+    expect(html).not.toContain(" style=");
   });
 
   it("拒绝来自渲染进程的畸形或超限出版配置", () => {

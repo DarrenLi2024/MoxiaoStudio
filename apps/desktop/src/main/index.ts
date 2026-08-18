@@ -153,16 +153,16 @@ function publicationPreview(projectValue?: unknown): {
   };
   const basePreflight = validatePublication(document, validationProfile, capabilities, assets);
   const issues = [...basePreflight.issues];
-  if (!document.sections.some((section) => section.role === "body")) issues.push({ severity: "error" as const, code: "document.body.empty", message: "当前筛选条件下没有可出版篇目" });
-  if (project.frontMatter.includeCopyright && !project.frontMatter.copyright.rightsHolder.trim()) issues.push({ severity: "error" as const, code: "copyright.holder.required", message: "版权页尚未填写版权所有者" });
+  if (!document.sections.some((section) => section.role === "body")) issues.push({ severity: "error" as const, code: "document.body.empty", message: "当前筛选条件下没有可出版篇目", fixStep: "arrange" as const });
+  if (project.frontMatter.includeCopyright && !project.frontMatter.copyright.rightsHolder.trim()) issues.push({ severity: "error" as const, code: "copyright.holder.required", message: "版权页尚未填写版权所有者", fixStep: "frontmatter" as const });
   const publicRelease = project.frontMatter.copyright.publicationType !== "private";
-  if (project.frontMatter.copyright.publicationType === "publisher" && !project.frontMatter.copyright.publisher.trim()) issues.push({ severity: "error" as const, code: "publisher.required", message: "出版社出版需填写出版社名称" });
-  if (project.frontMatter.includePreface && project.frontMatter.preface.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "preface.unconfirmed", message: "前言仍为待确认草稿" });
-  if (project.frontMatter.includeAuthorBio && project.frontMatter.author.biography.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "author-biography.unconfirmed", message: "作者简介仍为待确认草稿" });
+  if (project.frontMatter.copyright.publicationType === "publisher" && !project.frontMatter.copyright.publisher.trim()) issues.push({ severity: "error" as const, code: "publisher.required", message: "出版社出版需填写出版社名称", fixStep: "frontmatter" as const });
+  if (project.frontMatter.includePreface && project.frontMatter.preface.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "preface.unconfirmed", message: "前言仍为待确认草稿", fixStep: "frontmatter" as const });
+  if (project.frontMatter.includeAuthorBio && project.frontMatter.author.biography.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "author-biography.unconfirmed", message: "作者简介仍为待确认草稿", fixStep: "frontmatter" as const });
   if (project.target === "epub") {
     const cover = project.assets.find((asset) => asset.kind === "cover");
-    if (!cover) issues.push({ severity: "warning" as const, code: "epub.cover.recommended", message: "电子书尚未设置封面；发行平台通常要求独立封面" });
-    if (project.ebookProfile === "apple-books" && cover?.pixelWidth && cover.pixelHeight && Math.min(cover.pixelWidth, cover.pixelHeight) < 1_400) issues.push({ severity: "warning" as const, code: "apple-books.cover.resolution", message: "Apple Books 封面短边建议至少 1400 像素" });
+    if (!cover) issues.push({ severity: "warning" as const, code: "epub.cover.recommended", message: "电子书尚未设置封面；发行平台通常要求独立封面", fixStep: "media" as const });
+    if (project.ebookProfile === "apple-books" && cover?.pixelWidth && cover.pixelHeight && Math.min(cover.pixelWidth, cover.pixelHeight) < 1_400) issues.push({ severity: "warning" as const, code: "apple-books.cover.resolution", message: "Apple Books 封面短边建议至少 1400 像素", assetId: cover.id, fixStep: "media" as const });
   }
   const records = new Map(loadWorkspace().records.map((record) => [record.id, record]));
   for (const placement of project.placements) {
@@ -170,7 +170,7 @@ function publicationPreview(projectValue?: unknown): {
     if (placement.role !== "inline" || !anchor) continue;
     const record = records.get(placement.recordId);
     const body = record?.draft.work.prose?.trim() || record?.draft.work.lines.join("\n") || "";
-    if (!body.includes(anchor)) issues.push({ severity: "warning" as const, code: `illustration.anchor.missing.${placement.assetId}`, message: `${record?.draft.work.editorialTitle || record?.draft.work.title || "篇目"}的插图锚点未命中，将置于正文后` });
+    if (!body.includes(anchor)) issues.push({ severity: "warning" as const, code: `illustration.anchor.missing.${placement.assetId}.${placement.recordId}`, message: `${record?.draft.work.editorialTitle || record?.draft.work.title || "篇目"}的插图锚点未命中，将置于正文后`, assetId: placement.assetId, fixStep: "media" as const });
   }
   const preflight = { ok: issues.every((issue) => issue.severity !== "error"), issues };
   return { project, document, html: renderPublicationHtml(document, project.profile, assets, project.theme), preflight, capabilities };

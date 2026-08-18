@@ -230,6 +230,12 @@ function pageDimensions(profile: PublicationProfile): string {
   return `${width}mm ${height}mm`;
 }
 
+const PUBLICATION_STYLE_NONCE = "moxiao-publication-preview";
+
+function focalClass(point: readonly [number, number]): string {
+  return `focal-${Math.round(point[0] * 10_000)}-${Math.round(point[1] * 10_000)}`;
+}
+
 function blockHtml(block: PublicationBlock, assets: ReadonlyMap<string, PublicationAssetDeclaration>): string {
   if (block.type === "heading") return `<h${block.level} class="block-${block.semanticRole ?? "heading"}">${escapeHtml(block.text)}</h${block.level}>`;
   if (block.type === "paragraph") return `<p class="block-${block.semanticRole ?? "body"}">${escapeHtml(block.text).replaceAll("\n", "<br>")}</p>`;
@@ -238,7 +244,7 @@ function blockHtml(block: PublicationBlock, assets: ReadonlyMap<string, Publicat
   if (block.type === "toc") return `<nav class="book-toc" aria-label="目录"><ol>${block.entries.map((entry) => `<li>${entry.group ? `<span>${escapeHtml(entry.group)}</span>` : ""}<a href="#section-${entry.targetId}">${escapeHtml(entry.title)}</a></li>`).join("")}</ol></nav>`;
   const asset = assets.get(block.assetId);
   const focal = block.focalPoint ?? [0.5, 0.5];
-  return `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"}" data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}" style="object-position:${focal[0] * 100}% ${focal[1] * 100}%">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
+  return `<figure class="image-${block.placement ?? "inline"} image-${block.size ?? "wide"} align-${block.alignment ?? "center"} ${focalClass(focal)}" data-asset-id="${block.assetId}">${asset?.dataUri ? `<img src="${escapeHtml(asset.dataUri)}" alt="${escapeHtml(block.alt)}">` : `<div class="missing-image">插图资源 ${escapeHtml(block.assetId)}</div>`}${block.caption ? `<figcaption>${escapeHtml(block.caption)}</figcaption>` : ""}</figure>`;
 }
 
 export function renderPublicationHtml(document: PublicationDocument, profile: PublicationProfile, assetList: readonly PublicationAssetDeclaration[] = [], theme?: PublicationTheme): string {
@@ -250,6 +256,10 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
   const footer = profile.runningContent.enabled ? runningTemplateCss(profile.runningContent.footerTemplate, document.title) : "none";
   const assets = new Map(assetList.map((asset) => [asset.id, asset]));
   const fontFaces = assetList.filter((asset) => asset.kind === "font" && asset.dataUri && asset.fontFamily).map((asset) => `@font-face{font-family:"${cssText(asset.fontFamily!)}";src:url("${cssText(asset.dataUri!)}") format("${asset.mediaType.includes("woff2") ? "woff2" : asset.mediaType.includes("woff") ? "woff" : asset.mediaType.includes("otf") ? "opentype" : "truetype"}");font-display:block}`).join("");
+  const focalRules = [...new Map(document.sections.flatMap((section) => section.blocks).filter((block): block is Extract<PublicationBlock, { type: "image" }> => block.type === "image").map((block) => {
+    const point = block.focalPoint ?? [0.5, 0.5];
+    return [focalClass(point), point] as const;
+  })).entries()].map(([className, point]) => `.${className} img{object-position:${point[0] * 100}% ${point[1] * 100}%}`).join("");
   let bodyIndex = 0;
   const sections = document.sections.map((section) => {
     const number = section.role === "body" ? ++bodyIndex : 0;
@@ -257,9 +267,10 @@ export function renderPublicationHtml(document: PublicationDocument, profile: Pu
   }).join("");
   const watermarkPosition = profile.watermark.placement === "corner" ? "right:12mm;bottom:12mm" : "left:50%;top:50%;transform:translate(-50%,-50%) rotate(var(--watermark-rotation))";
   return `<!doctype html>
-<html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; img-src data:; font-src data:;"><title>${escapeHtml(document.title)}</title>
-<style>
+<html lang="${escapeHtml(document.language)}"><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'nonce-${PUBLICATION_STYLE_NONCE}'; img-src data:; font-src data:;"><title>${escapeHtml(document.title)}</title>
+<style nonce="${PUBLICATION_STYLE_NONCE}">
 ${fontFaces}
+${focalRules}
 :root{--watermark-opacity:${profile.watermark.opacity};--watermark-rotation:${profile.watermark.rotation}deg;--accent:${profile.accentColor ?? "#315f4d"}}
 @page{size:${pageDimensions(profile)};margin:${margins.top}mm ${margins.right}mm ${margins.bottom}mm ${margins.left}mm;${profile.bleedMm ? `bleed:${profile.bleedMm}mm;` : ""}${profile.cropMarks ? "marks:crop cross;" : ""}@top-center{content:${header};font:9px system-ui;color:#7d837c}@bottom-center{content:${footer};font:9px system-ui;color:#7d837c}}
 @page:first{@top-center{content:${profile.runningContent.suppressOnFirstPage ? "none" : header}}}
@@ -339,6 +350,9 @@ export interface PreflightIssue {
   readonly severity: "error" | "warning";
   readonly code: string;
   readonly message: string;
+  readonly assetId?: EntityId;
+  readonly sectionId?: EntityId;
+  readonly fixStep?: "book" | "arrange" | "frontmatter" | "style" | "media" | "export";
 }
 
 export interface PreflightResult {
@@ -356,16 +370,16 @@ export function validatePublication(
   if (!document.title.trim()) issues.push({ severity: "error", code: "document.title.required", message: "出版文档缺少书名" });
   if (!document.sections.length) issues.push({ severity: "error", code: "document.sections.empty", message: "出版文档没有可输出篇章" });
   const assetsById = new Map(assets.map((asset) => [asset.id, asset]));
-  for (const asset of assets) if (asset.rights === "unknown") issues.push({ severity: "error", code: "asset.rights.unresolved", message: `${asset.fileName ?? asset.id} 尚未确认使用权` });
+  for (const asset of assets) if (asset.rights === "unknown") issues.push({ severity: "error", code: `asset.rights.unresolved.${asset.id}`, message: `${asset.fileName ?? asset.id} 尚未确认使用权`, assetId: asset.id, fixStep: "media" });
   for (const section of document.sections) {
     if (!section.blocks.length) issues.push({ severity: "warning", code: "section.blocks.empty", message: `${section.title ?? section.id} 没有正文块` });
     for (const block of section.blocks) {
       const text = block.type === "verse" ? block.lines.join("\n") : block.type === "image" ? block.alt : block.type === "toc" ? block.entries.map((entry) => entry.title).join("\n") : block.text;
       if (text.includes("\uFFFD")) issues.push({ severity: "error", code: "text.replacement-character", message: `${section.title ?? section.id} 含有无法解码字符` });
       if (block.type !== "image") continue;
-      if (!block.alt.trim()) issues.push({ severity: "error", code: "image.alt.required", message: `${section.title ?? section.id} 的插图缺少替代文字` });
+      if (!block.alt.trim()) issues.push({ severity: "error", code: `image.alt.required.${block.assetId}.${section.id}`, message: `${section.title ?? section.id} 的插图缺少替代文字`, assetId: block.assetId, sectionId: section.id, fixStep: "media" });
       const asset = assetsById.get(block.assetId);
-      if (!asset) issues.push({ severity: "error", code: "asset.rights.unresolved", message: `${section.title ?? section.id} 的插图尚未登记` });
+      if (!asset) issues.push({ severity: "error", code: `asset.missing.${block.assetId}.${section.id}`, message: `${section.title ?? section.id} 的插图尚未登记`, assetId: block.assetId, sectionId: section.id, fixStep: "media" });
     }
   }
   return { ok: issues.every((issue) => issue.severity !== "error"), issues };

@@ -41,9 +41,13 @@ SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义�
 
 所有导出先生成与界面无关的 `PublicationDocument`，再应用 `PublicationProfile`。每个渲染适配器声明 `RendererCapabilities`；预检不通过时不得静默导出。
 
+桌面实时预览使用沙箱 `iframe srcDoc`，出版样式表以固定受控 nonce 同时通过父页面与子文档 CSP；不允许用全局 `unsafe-inline` 绕过安全边界，图片焦点等动态样式必须汇总为样式类。端到端门禁须断言 `document.styleSheets` 已挂载并核对计算样式，不能只检查生成 HTML 字符串。
+
 `PublicationProject` 位于活母本与 `PublicationDocument` 之间，当前格式为 1.2，独立保存书名、篇目收录、作者编定顺序、多体裁/系年筛选、电子书兼容配置、前置页事实、编校信息策略、媒体位置、字体和语义主题。空 `genreFilters` 表示全部体裁；1.0/1.1 的单体裁字段在读取时确定性迁移。出版项目不得改写作品 `seq`；多部书稿可以引用同一作品表达。生成成品时锁定项目、母本修订和表达哈希，形成新的 `Manifestation`。
 
 智能编排只生成可解释候选，篇目可以锁定位置，应用前保存旧顺序并可撤销。意境标签由当前正文、题注和赏析确定性推断，不写回作品事实层。媒体资产与摆放位置分离，同一图片可以在多个篇目复用；移除篇目位置不删除图库原图。`PublicationDocument` 使用 `cover`、`copyright`、`foreword`、`toc`、`chapter`、`author-bio`、`apparatus` 等语义角色，PDF、EPUB 和内容包不得各自重新推导成书内容。
+
+预检问题携带素材、篇章与修正步骤定位；界面按素材 ID 归并同图多处引用，只修改一次即可覆盖全部摆放。系统可以基于题名和图注生成替代文字草稿，但不得推断图片使用权，权属仍须由用户明确选择。
 
 默认开源渲染路径计划使用 Vivliostyle；专业印刷可选接入受许可的 Prince 或出版社指定引擎。PDF、EPUB、DOCX、Web 和闲心子墨内容包均消费同一 Publication IR。
 

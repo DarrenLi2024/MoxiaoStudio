@@ -396,10 +396,32 @@ kbd { padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color
 .standards-note { padding: 9px 10px; border-left: 2px solid var(--bamboo); border-radius: 0 6px 6px 0; background: var(--bamboo-soft); }
 .standards-note strong { color: var(--bamboo); font-size: 9px; }
 .standards-note p { margin: 4px 0 0; color: var(--muted); font-size: 8px; line-height: 1.55; }
-.preflight-card { padding: 10px 11px; border: 1px solid var(--line); border-radius: 7px; font-size: 10px; line-height: 1.5; }
+.preflight-card { display: grid; gap: 9px; padding: 10px 11px; border: 1px solid var(--line); border-radius: 7px; font-size: 10px; line-height: 1.5; }
 .preflight-card.is-ready { border-color: color-mix(in srgb, var(--bamboo) 35%, var(--line)); color: var(--bamboo); background: var(--bamboo-soft); }
 .preflight-card.has-errors { border-color: color-mix(in srgb, var(--cinnabar) 35%, var(--line)); color: var(--cinnabar); background: color-mix(in srgb, var(--cinnabar) 7%, var(--panel)); }
 .preflight-card p { margin: 5px 0 0; }
+.preflight-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 8px; }
+.preflight-heading > div { display: grid; gap: 2px; }
+.preflight-heading small { color: var(--muted); font-size: 8px; }
+.preflight-heading button { display: inline-flex; min-height: 28px; flex: none; align-items: center; gap: 4px; padding: 0 7px; border: 1px solid color-mix(in srgb, var(--bamboo) 42%, var(--line)); border-radius: 5px; color: var(--bamboo); background: var(--panel); font-size: 8px; }
+.preflight-guidance { margin: 0 !important; color: var(--muted); font-size: 8px; line-height: 1.55; }
+.preflight-task-list { display: grid; gap: 7px; }
+.preflight-asset-task { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto; gap: 7px; padding: 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--panel); }
+.preflight-asset-task > img, .preflight-file-mark { grid-row: 1 / span 3; width: 42px; height: 42px; border-radius: 4px; object-fit: cover; background: var(--chrome); }
+.preflight-file-mark { display: grid; place-items: center; color: var(--bamboo); font-family: var(--font-reading); font-size: 17px; }
+.preflight-task-copy { display: grid; min-width: 0; gap: 2px; }
+.preflight-task-copy strong, .preflight-task-copy small { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.preflight-task-copy strong { font-size: 9px; }
+.preflight-task-copy small { color: var(--muted); font-size: 8px; }
+.preflight-asset-task > label { grid-column: 2 / -1; grid-template-columns: 72px minmax(0, 1fr); align-items: center; }
+.preflight-asset-task > label input, .preflight-asset-task > label select { padding-block: 6px; }
+.preflight-locate { grid-column: 3; grid-row: 1; align-self: start; color: var(--bamboo); font-size: 8px; }
+.preflight-other-task { display: grid; grid-template-columns: 20px minmax(0, 1fr) auto; align-items: center; gap: 7px; padding: 7px 8px; border: 1px solid var(--line); border-radius: 6px; color: var(--ink); background: var(--panel); }
+.preflight-other-task > span { display: grid; width: 20px; height: 20px; place-items: center; border-radius: 50%; color: white; font-size: 8px; }
+.preflight-other-task > span.is-error { background: var(--cinnabar); }
+.preflight-other-task > span.is-warning { background: var(--amber); }
+.preflight-other-task p { margin: 0; color: var(--muted); font-size: 8px; }
+.preflight-other-task button { color: var(--bamboo); font-size: 8px; }
 .export-pdf-button { width: 100%; justify-content: center; }
 .export-pdf-button:disabled { cursor: not-allowed; opacity: 0.45; }
 .publication-receipt { margin: 0; color: var(--bamboo); font-size: 9px; line-height: 1.5; word-break: break-all; }

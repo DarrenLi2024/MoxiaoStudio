@@ -67,6 +67,17 @@ function changed(record: EditorialRecord): boolean {
   return record.operation === "add" || record.operation === "delete" || JSON.stringify(record.baseline) !== JSON.stringify(record.draft);
 }
 
+function suggestedAssetAlt(project: PublicationProject, asset: PublicationAsset, records: readonly EditorialRecord[]): string {
+  if (asset.caption?.trim()) return asset.caption.trim();
+  if (asset.kind === "cover") return `《${project.title || "文集"}》封面`;
+  if (asset.kind === "portrait") return `${project.frontMatter.author.displayName || project.creator || "作者"}肖像`;
+  const recordIds = [...new Set(project.placements.filter((placement) => placement.assetId === asset.id).map((placement) => placement.recordId))];
+  const titles = recordIds.map((recordId) => records.find((record) => record.id === recordId)).filter((record): record is EditorialRecord => Boolean(record)).map(titleOf);
+  if (titles.length === 1) return `《${titles[0]}》插图`;
+  if (titles.length > 1) return `文集插图，关联《${titles.slice(0, 3).join("》《")}》${titles.length > 3 ? `等${titles.length}篇` : ""}`;
+  return `${project.title || "文集"}${asset.kind === "ornament" ? "装饰图" : "插图"}`;
+}
+
 export function App() {
   const [workspace, setWorkspace] = useState<EditorialWorkspace | null>(null);
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -269,6 +280,30 @@ export function App() {
       return publicationProject.sortMode === "chronology-desc" ? rightYear - leftYear : leftYear - rightYear;
     });
   }, [publicationProject, records]);
+
+  const publicationAssetTasks = useMemo(() => {
+    if (!publicationProject) return [];
+    const grouped = new Map<string, PreflightIssue[]>();
+    for (const issue of publicationIssues) {
+      if (!issue.assetId || !publicationProject.assets.some((asset) => asset.id === issue.assetId)) continue;
+      grouped.set(issue.assetId, [...(grouped.get(issue.assetId) ?? []), issue]);
+    }
+    return [...grouped.entries()].map(([assetId, issues]) => {
+      const asset = publicationProject.assets.find((item) => item.id === assetId)!;
+      const recordIds = [...new Set(publicationProject.placements.filter((placement) => placement.assetId === assetId).map((placement) => placement.recordId))];
+      const titles = recordIds.map((recordId) => records.find((record) => record.id === recordId)).filter((record): record is EditorialRecord => Boolean(record)).map(titleOf);
+      return { asset, issues, recordIds, titles };
+    });
+  }, [publicationIssues, publicationProject, records]);
+
+  const publicationOtherIssues = useMemo(() => publicationIssues.filter((issue) => !issue.assetId || !publicationProject?.assets.some((asset) => asset.id === issue.assetId)), [publicationIssues, publicationProject]);
+
+  function generateMissingAltDrafts(): void {
+    if (!publicationProject) return;
+    const taskIds = new Set(publicationAssetTasks.filter((task) => task.issues.some((issue) => issue.code.startsWith("image.alt.required"))).map((task) => task.asset.id));
+    updatePublication((project) => ({ ...project, assets: project.assets.map((asset) => taskIds.has(asset.id) && !asset.alt.trim() ? { ...asset, alt: suggestedAssetAlt(project, asset, records) } : asset) }));
+    setPublicationReceipt(`已生成 ${taskIds.size} 条替代文字草稿，请在导出前复核语义是否准确`);
+  }
 
   async function exportPublication(): Promise<void> {
     if (!publicationProject) return;
@@ -598,7 +633,20 @@ export function App() {
               <fieldset><legend>纸张与页眉</legend><label>纸张<select value={publicationProject.profile.pageSize} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, pageSize: event.target.value as PublicationProject["profile"]["pageSize"] } }))}><option value="A4">A4</option><option value="A5">A5</option><option value="B5">B5</option></select></label><label className="switch-label"><input type="checkbox" checked={publicationProject.profile.runningContent.enabled} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, runningContent: { ...project.profile.runningContent, enabled: event.target.checked } } }))} />启用页眉页脚</label><label>页眉<input value={publicationProject.profile.runningContent.headerTemplate} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, runningContent: { ...project.profile.runningContent, headerTemplate: event.target.value } } }))} /></label><label>页脚<input value={publicationProject.profile.runningContent.footerTemplate} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, runningContent: { ...project.profile.runningContent, footerTemplate: event.target.value } } }))} /></label></fieldset>
               <fieldset><legend>水印</legend><label className="switch-label"><input type="checkbox" checked={publicationProject.profile.watermark.enabled} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, watermark: { ...project.profile.watermark, enabled: event.target.checked } } }))} />启用</label><label>文字<input value={publicationProject.profile.watermark.content} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, watermark: { ...project.profile.watermark, content: event.target.value } } }))} /></label></fieldset>
               <fieldset><legend>交付目标</legend><label>格式<select aria-label="目标客户端" value={publicationProject.target} onChange={(event) => updatePublication((project) => ({ ...project, target: event.target.value as PublicationProject["target"] }))}><option value="pdf">通用屏幕 PDF</option><option value="epub">EPUB 3.3 可重排电子书</option><option value="xianxinzimo">闲心子墨暂存内容包</option><option value="webpub">通用 WebPub 内容包</option></select></label>{publicationProject.target === "pdf" && <label>PDF 规范<select value={publicationProject.profile.pdfProfile} onChange={(event) => updatePublication((project) => ({ ...project, profile: { ...project.profile, pdfProfile: event.target.value as PublicationProject["profile"]["pdfProfile"] } }))}><option value="screen">通用屏幕 PDF</option><option value="PDF/X-4">PDF/X-4 印刷</option><option value="PDF/A-2b">PDF/A-2b 归档</option><option value="PDF/UA-1">PDF/UA-1 无障碍</option></select></label>}{publicationProject.target === "epub" && <><label>阅读器兼容配置<select aria-label="电子书兼容配置" value={publicationProject.ebookProfile} onChange={(event) => updatePublication((project) => ({ ...project, ebookProfile: event.target.value as PublicationProject["ebookProfile"] }))}><option value="universal">通用 EPUB 3.3</option><option value="apple-books">Apple Books</option><option value="wechat-reading">中文阅读器兼容基线</option></select></label><div className="standards-note"><strong>可重排优先</strong><p>目录、阅读顺序、语义地标、替代文字和深浅色适配按 EPUB 3.3 封装。平台最终验收仍以其发行后台规则为准。</p></div></>}</fieldset>
-              <div className={`preflight-card ${publicationIssues.some((issue) => issue.severity === "error") ? "has-errors" : "is-ready"}`}><strong>{publicationIssues.length ? `预检发现 ${publicationIssues.length} 项` : "预检通过，可安全导出"}</strong>{publicationIssues.map((issue) => <p key={issue.code}>{issue.message}</p>)}</div>
+              <div className={`preflight-card ${publicationIssues.some((issue) => issue.severity === "error") ? "has-errors" : "is-ready"}`}>
+                <div className="preflight-heading"><div><strong>{publicationIssues.length ? `预检待处理 ${publicationAssetTasks.length + publicationOtherIssues.length} 项` : "预检通过，可安全导出"}</strong>{publicationIssues.length > publicationAssetTasks.length + publicationOtherIssues.length && <small>已将 {publicationIssues.length} 条检查结果按素材归并，避免重复修正</small>}</div>{publicationAssetTasks.some((task) => !task.asset.alt.trim()) && <button onClick={generateMissingAltDrafts}><Sparkles size={12} />生成替代文字草稿</button>}</div>
+                {publicationIssues.length > 0 && <p className="preflight-guidance">可直接在此修正，不必返回各篇逐项查找。替代文字可生成草稿；使用权必须依据真实权属确认。</p>}
+                <div className="preflight-task-list">
+                  {publicationAssetTasks.map(({ asset, issues, recordIds, titles }) => <section className="preflight-asset-task" key={asset.id}>
+                    {asset.dataUri && asset.kind !== "font" ? <img src={asset.dataUri} alt="待预检素材缩略图" /> : <span className="preflight-file-mark">{asset.kind === "font" ? "字" : "图"}</span>}
+                    <div className="preflight-task-copy"><strong>{asset.fileName}</strong><small>{titles.length ? `用于：${titles.join("、")}` : issues.map((issue) => issue.message).join("；")}</small></div>
+                    <label>替代文字<input aria-label={`${asset.fileName}替代文字`} value={asset.alt} placeholder="描述图像传达的信息，而非文件名" onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, alt: event.target.value } : item) }))} /></label>
+                    <label>使用权<select aria-label={`${asset.fileName}使用权`} value={asset.rights} onChange={(event) => updatePublication((project) => ({ ...project, assets: project.assets.map((item) => item.id === asset.id ? { ...item, rights: event.target.value as PublicationAsset["rights"] } : item) }))}><option value="unknown">待确认</option><option value="owned">作者自有</option><option value="licensed">已获授权</option><option value="public-domain">公版</option></select></label>
+                    <button className="preflight-locate" onClick={() => { if (recordIds[0]) setPublicationRecordId(recordIds[0]); setPublicationStep("media"); }}>在插图页查看</button>
+                  </section>)}
+                  {publicationOtherIssues.map((issue) => <div className="preflight-other-task" key={issue.code}><span className={issue.severity === "error" ? "is-error" : "is-warning"}>{issue.severity === "error" ? "阻" : "提"}</span><p>{issue.message}</p>{issue.fixStep && issue.fixStep !== "export" && <button onClick={() => setPublicationStep(issue.fixStep!)}>去修正</button>}</div>)}
+                </div>
+              </div>
               <button className="primary-button export-pdf-button" disabled={publicationBusy || publicationIssues.some((issue) => issue.severity === "error")} onClick={() => void exportPublication()}>{publicationBusy ? <LoaderCircle size={15} className="spin" /> : publicationProject.target === "epub" ? <BookOpenText size={15} /> : <FileOutput size={15} />} 导出并验证{{ pdf: " PDF", epub: " EPUB", xianxinzimo: "闲心子墨包", webpub: " WebPub 包" }[publicationProject.target]}</button>
               {publicationReceipt && <p className="publication-receipt">{publicationReceipt}</p>}
             </aside>
