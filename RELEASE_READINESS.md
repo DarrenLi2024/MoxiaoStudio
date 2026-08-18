@@ -10,7 +10,8 @@
 - 0.3.2 应用公证提交 `688268ab-eb9d-434e-af53-2457250d3dc2`、DMG 公证提交 `be3648b4-328b-45ec-9c43-503af6c51fed` 均由 Apple 接受。
 - 最终 DMG 副本添加 `com.apple.quarantine` 后只读挂载；DMG 与包内应用 Gatekeeper、票据和深层签名通过，包内冷启动及真实 PDF 导出测试 1/1 通过。
 - 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.3.2-arm64.dmg`，119,421,154 字节，SHA-256 `9cb04eff29c97899bccd1e1a709c0c08e145e8cc83bb64109a8b121623142be2`；独立清单复核为 `OK`。
-- GitHub 提交、标签、预发布与远端资产摘要待发行提交完成后补录。
+- 发行提交 `8672da4` 已推送到 `codex/bootstrap`，注释标签 `v0.3.2` 指向该提交；GitHub 预发布已创建并核验为非草稿、预发布状态。
+- GitHub DMG 资产为 119,421,154 字节，服务端 SHA-256 `9cb04eff29c97899bccd1e1a709c0c08e145e8cc83bb64109a8b121623142be2` 与本地一致；同时发布 96 字节独立校验清单。
 
 ## 0.3.1 精装电子书编排工作台
 
