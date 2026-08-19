@@ -8,7 +8,9 @@
 - 最终 E2E EPUB 经 EPUBCheck 3.3 验证为 0 fatal、0 error、0 warning；A5 PDF 为 10 页、Tagged、无 JavaScript。
 - 正式 SQLite 仅使用 2026-08-18 在线备份的二次临时副本：样式/预检回归 1/1 通过；228 篇整卷导出为 489 页 A4 Tagged PDF，9,148,819 字节，SHA-256 `94a29e3672eefb75ad96f3aa9b334658aac1ffa0d7f502e2c5101ad047aba6bd`，正式库未被写入。
 - 生产依赖已知漏洞为零，常见私钥、令牌和公证密码模式扫描无命中。
-- Developer ID 签名、公证、票据装订、Gatekeeper、隔离属性冷启动、GitHub 资产摘要尚待本节后续记录；在完成前不得把 0.4.0 标记为公开可安装制品。
+- 0.4.0 应用公证提交 `5199ba7b-6e3e-4cc1-84ee-6720776fe2d3`、DMG 公证提交 `7121556f-0c84-4f6a-8cc5-f13eee14e08e` 均由 Apple 接受；应用与 DMG 的票据、Developer ID 签名及 Gatekeeper 验证通过。
+- 最终 DMG 副本添加 `com.apple.quarantine` 后只读挂载，包内应用票据、深层签名和 Gatekeeper 通过，打包版冷启动及真实 PDF 导出测试 1/1 通过。
+- 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.4.0-arm64.dmg`，119,340,895 字节，SHA-256 `cf2937698f7ce7039f2bea477c7f47e8d2d0fb208e287caa45bde9bc35df1c7c`；独立清单待随 GitHub 预发布上传并复核。
 
 ## 0.3.2 出版样式与预检热修
 
