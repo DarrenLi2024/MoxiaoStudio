@@ -10,7 +10,8 @@
 - 生产依赖已知漏洞为零，常见私钥、令牌和公证密码模式扫描无命中。
 - 0.4.0 应用公证提交 `5199ba7b-6e3e-4cc1-84ee-6720776fe2d3`、DMG 公证提交 `7121556f-0c84-4f6a-8cc5-f13eee14e08e` 均由 Apple 接受；应用与 DMG 的票据、Developer ID 签名及 Gatekeeper 验证通过。
 - 最终 DMG 副本添加 `com.apple.quarantine` 后只读挂载，包内应用票据、深层签名和 Gatekeeper 通过，打包版冷启动及真实 PDF 导出测试 1/1 通过。
-- 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.4.0-arm64.dmg`，119,340,895 字节，SHA-256 `cf2937698f7ce7039f2bea477c7f47e8d2d0fb208e287caa45bde9bc35df1c7c`；独立清单待随 GitHub 预发布上传并复核。
+- 最终 Apple Silicon DMG 为 `Moxiao-Studio-0.4.0-arm64.dmg`，119,340,895 字节，SHA-256 `cf2937698f7ce7039f2bea477c7f47e8d2d0fb208e287caa45bde9bc35df1c7c`；独立清单复核为 `OK`。
+- 发行提交 `7534457` 已推送到 `codex/bootstrap`，注释标签 `v0.4.0` 指向该提交；GitHub 预发布已创建并核验为非草稿、预发布状态。DMG 资产为 119,340,895 字节，服务端 SHA-256 与本地一致，同时发布 96 字节独立校验清单。
 
 ## 0.3.2 出版样式与预检热修
 
