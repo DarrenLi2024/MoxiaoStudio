@@ -1,6 +1,6 @@
 {
   "name": "@moxiao/desktop",
-  "version": "0.1.2",
+  "version": "0.5.0",
   "private": true,
   "license": "MPL-2.0",
   "description": "面向中文文学创作者与编校者的本地优先开放出版工作台",
@@ -10,12 +10,13 @@
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "dist:mac:raw": "pnpm build && electron-builder --mac dmg --arm64 --publish never",
-    "pack:mac": "pnpm build && electron-builder --mac dir --arm64 --publish never",
+    "dist:mac:raw": "pnpm build && electron-builder --mac dmg --arm64 --publish never --config.electronDist=node_modules/electron/dist",
+    "pack:mac": "pnpm build && electron-builder --mac dir --arm64 --publish never --config.electronDist=node_modules/electron/dist",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@moxiao/assistant": "workspace:*",
     "@moxiao/domain": "workspace:*",
     "@moxiao/editorial": "workspace:*",
     "@moxiao/ontology": "workspace:*",
@@ -54,7 +55,7 @@
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
       "forceCodeSigning": true,
-      "notarize": true,
+      "notarize": false,
       "minimumSystemVersion": "12.0",
       "target": ["dmg"]
     },

@@ -1,4 +1,5 @@
 import { DatabaseSync } from "node:sqlite";
+import type { AssistantRun, AssistantSuggestion, AssistantSuggestionStatus } from "@moxiao/assistant";
 import { createEntityId, type EntityId } from "@moxiao/domain";
 import { digest, importLegacyWorkspace, stableStringify, validateWorkspace, type EditorialWorkspace } from "@moxiao/editorial";
 
@@ -22,6 +23,14 @@ interface SnapshotRow {
 
 interface CountRow {
   count: number;
+}
+
+interface PublicationProjectRow {
+  payload_json: string;
+}
+
+interface AssistantPayloadRow {
+  payload_json: string;
 }
 
 export interface SemanticVersionReceipt {
@@ -125,9 +134,42 @@ export class WorkspaceStore {
         created_at TEXT NOT NULL,
         delivered_at TEXT
       ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS publication_projects (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        updated_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_publication_projects_workspace ON publication_projects(workspace_id, updated_at DESC);
+
+      CREATE TABLE IF NOT EXISTS assistant_runs (
+        id TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        created_at TEXT NOT NULL
+      ) STRICT;
+
+      CREATE TABLE IF NOT EXISTS assistant_suggestions (
+        id TEXT PRIMARY KEY,
+        run_id TEXT NOT NULL REFERENCES assistant_runs(id) ON DELETE CASCADE,
+        workspace_id TEXT NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+        status TEXT NOT NULL,
+        payload_json TEXT NOT NULL CHECK (json_valid(payload_json)),
+        created_at TEXT NOT NULL,
+        decided_at TEXT
+      ) STRICT;
+
+      CREATE INDEX IF NOT EXISTS idx_assistant_runs_workspace ON assistant_runs(workspace_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_assistant_suggestions_workspace_status ON assistant_suggestions(workspace_id, status, created_at DESC);
     `);
     this.database.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)")
       .run(1, new Date().toISOString());
+    this.database.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+      .run(2, new Date().toISOString());
+    this.database.prepare("INSERT OR IGNORE INTO schema_migrations(version, applied_at) VALUES (?, ?)")
+      .run(3, new Date().toISOString());
   }
 
   initializeWorkspace(workspaceId: string, workspaceValue: EditorialWorkspace): EditorialWorkspace {
@@ -215,6 +257,15 @@ export class WorkspaceStore {
     `).all(workspaceId) as unknown as SemanticVersionReceipt[];
   }
 
+  restoreSemanticVersion(workspaceId: string, versionId: string, expectedRevision: number, now = new Date().toISOString()): EditorialWorkspace {
+    const row = this.database.prepare(`
+      SELECT snapshot_json FROM semantic_versions WHERE workspace_id = ? AND id = ?
+    `).get(workspaceId, versionId) as unknown as SnapshotRow | undefined;
+    if (!row) throw new Error("找不到指定语义版本");
+    const snapshot = importLegacyWorkspace(JSON.parse(row.snapshot_json));
+    return this.saveWorkspace(workspaceId, { ...snapshot, revision: expectedRevision }, expectedRevision, now);
+  }
+
   restoreRevision(workspaceId: string, revision: number, expectedRevision: number, now = new Date().toISOString()): EditorialWorkspace {
     const row = this.database.prepare(`
       SELECT payload_json AS snapshot_json FROM recovery_log WHERE workspace_id = ? AND revision = ? ORDER BY created_at DESC LIMIT 1
@@ -232,6 +283,70 @@ export class WorkspaceStore {
   tombstoneCount(workspaceId: string): number {
     const row = this.database.prepare("SELECT COUNT(*) AS count FROM tombstones WHERE workspace_id = ?").get(workspaceId) as unknown as CountRow;
     return row.count;
+  }
+
+  loadPublicationProject<T>(workspaceId: string, projectId: string): T | null {
+    const row = this.database.prepare("SELECT payload_json FROM publication_projects WHERE workspace_id = ? AND id = ?")
+      .get(workspaceId, projectId) as unknown as PublicationProjectRow | undefined;
+    return row ? JSON.parse(row.payload_json) as T : null;
+  }
+
+  listPublicationProjects<T>(workspaceId: string): T[] {
+    const rows = this.database.prepare("SELECT payload_json FROM publication_projects WHERE workspace_id = ? ORDER BY updated_at DESC, id")
+      .all(workspaceId) as unknown as PublicationProjectRow[];
+    return rows.map((row) => JSON.parse(row.payload_json) as T);
+  }
+
+  savePublicationProject<T>(workspaceId: string, projectId: string, value: T, now = new Date().toISOString()): T {
+    if (!this.hasWorkspace(workspaceId)) throw new Error(`工作区不存在：${workspaceId}`);
+    const payload = stableStringify(value);
+    this.database.prepare(`
+      INSERT INTO publication_projects(id, workspace_id, payload_json, updated_at)
+      VALUES (?, ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET payload_json = excluded.payload_json, updated_at = excluded.updated_at
+      WHERE publication_projects.workspace_id = excluded.workspace_id
+    `).run(projectId, workspaceId, payload, now);
+    return JSON.parse(payload) as T;
+  }
+
+  saveAssistantRun(workspaceId: string, run: AssistantRun, suggestions: readonly AssistantSuggestion[]): void {
+    if (!this.hasWorkspace(workspaceId)) throw new Error(`工作区不存在：${workspaceId}`);
+    if (suggestions.some((suggestion) => suggestion.runId !== run.id)) throw new Error("建议与运行批次不一致");
+    this.database.exec("BEGIN IMMEDIATE");
+    try {
+      this.database.prepare(`
+        INSERT INTO assistant_runs(id, workspace_id, payload_json, created_at) VALUES (?, ?, ?, ?)
+      `).run(run.id, workspaceId, stableStringify(run), run.createdAt);
+      const insert = this.database.prepare(`
+        INSERT INTO assistant_suggestions(id, run_id, workspace_id, status, payload_json, created_at, decided_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+      `);
+      for (const suggestion of suggestions) insert.run(suggestion.id, run.id, workspaceId, suggestion.status, stableStringify(suggestion), suggestion.createdAt, suggestion.decidedAt ?? null);
+      this.database.exec("COMMIT");
+    } catch (error) {
+      this.database.exec("ROLLBACK");
+      throw error;
+    }
+  }
+
+  listAssistantRuns(workspaceId: string): AssistantRun[] {
+    const rows = this.database.prepare(`SELECT payload_json FROM assistant_runs WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`).all(workspaceId) as unknown as AssistantPayloadRow[];
+    return rows.map((row) => JSON.parse(row.payload_json) as AssistantRun);
+  }
+
+  listAssistantSuggestions(workspaceId: string, status?: AssistantSuggestionStatus): AssistantSuggestion[] {
+    const rows = status
+      ? this.database.prepare(`SELECT payload_json FROM assistant_suggestions WHERE workspace_id = ? AND status = ? ORDER BY created_at DESC, id DESC`).all(workspaceId, status)
+      : this.database.prepare(`SELECT payload_json FROM assistant_suggestions WHERE workspace_id = ? ORDER BY created_at DESC, id DESC`).all(workspaceId);
+    return (rows as unknown as AssistantPayloadRow[]).map((row) => JSON.parse(row.payload_json) as AssistantSuggestion);
+  }
+
+  updateAssistantSuggestion(workspaceId: string, suggestion: AssistantSuggestion): AssistantSuggestion {
+    const result = this.database.prepare(`
+      UPDATE assistant_suggestions SET status = ?, payload_json = ?, decided_at = ? WHERE workspace_id = ? AND id = ?
+    `).run(suggestion.status, stableStringify(suggestion), suggestion.decidedAt ?? null, workspaceId, suggestion.id);
+    if (result.changes !== 1) throw new Error("智校建议不存在");
+    return structuredClone(suggestion);
   }
 
   private currentRevision(workspaceId: string): number {

@@ -1,13 +1,12 @@
 import { createHash } from "node:crypto";
-import { readFileSync, renameSync, statSync, writeFileSync } from "node:fs";
+import { readFileSync, renameSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { app, BrowserWindow, dialog, ipcMain, nativeTheme } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, nativeImage, nativeTheme } from "electron";
 import {
   compareDuplicatePair,
   createNewRecord,
   createWorkspace,
-  digest,
   findDuplicates,
   importLegacyWorkspace,
   markForDeletion,
@@ -21,31 +20,40 @@ import {
 import { WorkspaceStore } from "@moxiao/storage";
 import {
   chromiumRendererCapabilities,
-  createDefaultPublicationProfile,
+  contentPackageRendererCapabilities,
   electronPrintOptions,
+  epubRendererCapabilities,
+  literaryFormLabels,
+  renderEpub,
   renderPublicationHtml,
+  validateEpubBytes,
   validatePdfBytes,
   validatePublication,
   validatePublicationProfile,
-  type PublicationDocument,
-  type PublicationProfile
+  validatePublicationProject,
+  type ArrangementProposal,
+  type PublicationAsset,
+  type PublicationProject
 } from "@moxiao/publication";
 import { createEntityId } from "@moxiao/domain";
+import { applyAssistantSuggestion, decideAssistantSuggestion, type AssistantSuggestionStatus } from "@moxiao/assistant";
+import { AssistantService } from "./assistant-service";
+import {
+  LOCAL_PUBLICATION_PROJECT_ID,
+  createDefaultPublicationProject,
+  generateFrontMatter,
+  publicationAssets,
+  publicationDocument,
+  proposeArrangement,
+  synchronizePublicationProject,
+  targetPackage
+} from "./publication-workflow";
 
 const WORKSPACE_ID = "local-main";
-const FORM_LABELS = {
-  qijue: "七绝",
-  wujue: "五绝",
-  qilv: "七律",
-  wulv: "五律",
-  ci: "词",
-  xinshi: "新诗",
-  sanwen: "散文",
-  suibi: "随笔",
-  duilian: "对联"
-} as const;
+const FORM_LABELS = literaryFormLabels;
 
 let store: WorkspaceStore | null = null;
+let assistantService: AssistantService | null = null;
 
 if (process.env.MOXIAO_THEME === "dark" || process.env.MOXIAO_THEME === "light") {
   nativeTheme.themeSource = process.env.MOXIAO_THEME;
@@ -81,6 +89,11 @@ function activeStore(): WorkspaceStore {
   return store;
 }
 
+function activeAssistantService(): AssistantService {
+  if (!assistantService) throw new Error("智校服务尚未就绪");
+  return assistantService;
+}
+
 function loadWorkspace(): EditorialWorkspace {
   const workspace = activeStore().loadWorkspace(WORKSPACE_ID);
   if (!workspace) throw new Error("本地工作区不存在");
@@ -98,64 +111,128 @@ function atomicWrite(filePath: string, value: string | Uint8Array): void {
   renameSync(temporary, filePath);
 }
 
-function publicationDocument(workspace: EditorialWorkspace): PublicationDocument {
-  const activeRecords = workspace.records.filter((record) => record.operation !== "delete");
-  return {
-    id: createEntityId(),
-    expressionId: createEntityId(),
-    expressionHash: `sha256:${digest(workspace)}`,
-    title: "本地文学项目",
-    language: "zh-CN",
-    sections: activeRecords.map((record) => {
-      const work = record.draft.work;
-      const reading = record.draft.reading;
-      const blocks: PublicationDocument["sections"][number]["blocks"][number][] = [];
-      if (work.prose?.trim()) blocks.push({ type: "paragraph", text: work.prose.trim() });
-      else blocks.push({ type: "verse", lines: work.lines });
-      if (work.compositionNote?.trim()) blocks.push({ type: "annotation", marker: "创作题注", text: work.compositionNote.trim() });
-      if (reading?.translation?.trim()) blocks.push({ type: "heading", level: 2, text: "今译" }, { type: "paragraph", text: reading.translation.trim() });
-      for (const annotation of reading?.annotations ?? []) blocks.push({ type: "annotation", marker: annotation.anchor, text: annotation.note });
-      if (reading?.appreciation?.trim()) blocks.push({ type: "heading", level: 2, text: "赏析" }, { type: "paragraph", text: reading.appreciation.trim() });
-      return { id: record.entityId, role: "body" as const, title: work.editorialTitle?.trim() || work.title.trim() || "未题名", blocks };
-    })
-  };
+function loadPublicationProject(projectId: string = LOCAL_PUBLICATION_PROJECT_ID): PublicationProject {
+  const workspace = loadWorkspace();
+  const stored = activeStore().loadPublicationProject<PublicationProject>(WORKSPACE_ID, projectId);
+  const project = synchronizePublicationProject(stored ? validatePublicationProject(stored) : createDefaultPublicationProject(workspace), workspace);
+  if (!stored || stableStringify(project) !== stableStringify(stored)) activeStore().savePublicationProject(WORKSPACE_ID, project.id, project);
+  return project;
 }
 
-function publicationPreview(profileValue?: PublicationProfile): {
-  profile: PublicationProfile;
-  document: PublicationDocument;
+function savePublicationProject(value: unknown): PublicationProject {
+  const project = synchronizePublicationProject(validatePublicationProject(value), loadWorkspace());
+  validatePublicationProfile(project.profile);
+  return activeStore().savePublicationProject(WORKSPACE_ID, project.id, { ...project, updatedAt: new Date().toISOString() });
+}
+
+function renderingProject(value?: unknown): PublicationProject {
+  const project = synchronizePublicationProject(value ? validatePublicationProject(value) : loadPublicationProject(), loadWorkspace());
+  const profile = validatePublicationProfile({
+    ...project.profile,
+    bodyFont: project.theme.bodyFont,
+    headingFont: project.theme.headingFont,
+    baseFontPt: project.theme.baseFontPt,
+    lineHeight: project.theme.lineHeight,
+    accentColor: project.theme.accentColor,
+    ornament: project.theme.ornament
+  });
+  return { ...project, profile };
+}
+
+function publicationPreview(projectValue?: unknown): {
+  project: PublicationProject;
+  document: ReturnType<typeof publicationDocument>;
   html: string;
   preflight: ReturnType<typeof validatePublication>;
   capabilities: typeof chromiumRendererCapabilities;
 } {
-  const profile = profileValue ? validatePublicationProfile(profileValue) : createDefaultPublicationProfile(createEntityId());
-  const document = publicationDocument(loadWorkspace());
-  return { profile, document, html: renderPublicationHtml(document, profile), preflight: validatePublication(document, profile, chromiumRendererCapabilities), capabilities: chromiumRendererCapabilities };
+  const project = renderingProject(projectValue);
+  const assets = publicationAssets(project);
+  const document = publicationDocument(loadWorkspace(), project);
+  const capabilities = project.target === "pdf" ? chromiumRendererCapabilities : project.target === "epub" ? epubRendererCapabilities : contentPackageRendererCapabilities;
+  const validationProfile = project.target === "pdf" ? project.profile : {
+    ...project.profile,
+    bleedMm: 0,
+    cropMarks: false,
+    mirrorMargins: false,
+    watermark: { ...project.profile.watermark, enabled: false },
+    runningContent: { ...project.profile.runningContent, enabled: false, differentOddEven: false },
+    pdfProfile: "screen" as const
+  };
+  const basePreflight = validatePublication(document, validationProfile, capabilities, assets);
+  const issues = [...basePreflight.issues];
+  if (!document.sections.some((section) => section.role === "body")) issues.push({ severity: "error" as const, code: "document.body.empty", message: "当前筛选条件下没有可出版篇目", fixStep: "arrange" as const });
+  if (project.frontMatter.includeCopyright && !project.frontMatter.copyright.rightsHolder.trim()) issues.push({ severity: "error" as const, code: "copyright.holder.required", message: "版权页尚未填写版权所有者", fixStep: "frontmatter" as const });
+  const publicRelease = project.frontMatter.copyright.publicationType !== "private";
+  if (project.frontMatter.copyright.publicationType === "publisher" && !project.frontMatter.copyright.publisher.trim()) issues.push({ severity: "error" as const, code: "publisher.required", message: "出版社出版需填写出版社名称", fixStep: "frontmatter" as const });
+  if (project.frontMatter.includePreface && project.frontMatter.preface.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "preface.unconfirmed", message: "前言仍为待确认草稿", fixStep: "frontmatter" as const });
+  if (project.frontMatter.includeAuthorBio && project.frontMatter.author.biography.status === "draft") issues.push({ severity: publicRelease ? "error" as const : "warning" as const, code: "author-biography.unconfirmed", message: "作者简介仍为待确认草稿", fixStep: "frontmatter" as const });
+  if (project.target === "epub") {
+    const cover = project.assets.find((asset) => asset.kind === "cover");
+    if (!cover) issues.push({ severity: "warning" as const, code: "epub.cover.recommended", message: "电子书尚未设置封面；发行平台通常要求独立封面", fixStep: "media" as const });
+    if (project.ebookProfile === "apple-books" && cover?.pixelWidth && cover.pixelHeight && Math.min(cover.pixelWidth, cover.pixelHeight) < 1_400) issues.push({ severity: "warning" as const, code: "apple-books.cover.resolution", message: "Apple Books 封面短边建议至少 1400 像素", assetId: cover.id, fixStep: "media" as const });
+    if (project.layoutSpecification.facingPages || project.layoutSpecification.columns > 1 || project.layoutSpecification.baselineGrid.enabled) issues.push({ severity: "warning" as const, code: "epub.layout.reflow-adaptation", message: "EPUB 为可重排版：对页、分栏与基线网格仅用于 PDF，电子书将保留语义样式并交由阅读器重排", fixStep: "style" as const });
+  }
+  const records = new Map(loadWorkspace().records.map((record) => [record.id, record]));
+  for (const placement of project.placements) {
+    const anchor = placement.anchorText?.trim();
+    if (placement.role !== "inline" || !anchor) continue;
+    const record = records.get(placement.recordId);
+    const body = record?.draft.work.prose?.trim() || record?.draft.work.lines.join("\n") || "";
+    if (!body.includes(anchor)) issues.push({ severity: "warning" as const, code: `illustration.anchor.missing.${placement.assetId}.${placement.recordId}`, message: `${record?.draft.work.editorialTitle || record?.draft.work.title || "篇目"}的插图锚点未命中，将置于正文后`, assetId: placement.assetId, fixStep: "media" as const });
+  }
+  const preflight = { ok: issues.every((issue) => issue.severity !== "error"), issues };
+  return { project, document, html: renderPublicationHtml(document, project.profile, assets, project.theme, project.styleSheet, project.layoutSpecification), preflight, capabilities };
 }
 
-async function exportPublication(profile: PublicationProfile): Promise<unknown> {
-  const preview = publicationPreview(profile);
+async function exportPublication(projectValue: unknown): Promise<unknown> {
+  const project = savePublicationProject(projectValue);
+  const preview = publicationPreview(project);
   if (!preview.document.sections.length) throw new Error("工作区没有可出版作品");
   if (!preview.preflight.ok) throw new Error(`出版预检未通过：${preview.preflight.issues.map((issue) => issue.message).join("；")}`);
+  if (project.target === "epub") {
+    let filePath = process.env.MOXIAO_E2E_EPUB_PATH;
+    if (!filePath) {
+      const selection = await dialog.showSaveDialog({ title: "导出 EPUB 3", defaultPath: `${project.title}.epub`, filters: [{ name: "EPUB", extensions: ["epub"] }] });
+      if (selection.canceled || !selection.filePath) return { canceled: true };
+      filePath = selection.filePath;
+    }
+    const bytes = renderEpub(preview.document, project, publicationAssets(project));
+    const validation = validateEpubBytes(bytes);
+    if (!validation.ok) throw new Error(`EPUB 导出验证失败：${validation.issues.map((issue) => issue.message).join("；")}`);
+    atomicWrite(filePath, bytes);
+    return { canceled: false, filePath, contentHash: `sha256:${createHash("sha256").update(bytes).digest("hex")}`, validation, profile: "EPUB 3" };
+  }
+  if (project.target === "xianxinzimo" || project.target === "webpub") {
+    const selection = await dialog.showSaveDialog({ title: "导出目标客户端暂存包", defaultPath: `${project.title}-${project.target}.json`, filters: [{ name: "JSON", extensions: ["json"] }] });
+    if (selection.canceled || !selection.filePath) return { canceled: true };
+    const payload = targetPackage(loadWorkspace(), project, preview.document);
+    atomicWrite(selection.filePath, payload);
+    return { canceled: false, filePath: selection.filePath, contentHash: `sha256:${createHash("sha256").update(payload).digest("hex")}`, validation: { ok: true, entryCount: preview.document.sections.length, byteLength: Buffer.byteLength(payload), issues: [] }, profile: project.target };
+  }
   let filePath = process.env.MOXIAO_E2E_PDF_PATH;
   if (!filePath) {
     const selection = await dialog.showSaveDialog({ title: "导出排印 PDF", defaultPath: "墨校台-排印稿.pdf", filters: [{ name: "PDF", extensions: ["pdf"] }] });
     if (selection.canceled || !selection.filePath) return { canceled: true };
     filePath = selection.filePath;
   }
-  const printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
-  printWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+  const printHtmlPath = join(tmpdir(), `moxiao-print-${process.pid}-${createEntityId()}.html`);
+  writeFileSync(printHtmlPath, preview.html, { encoding: "utf8", flag: "wx", mode: 0o600 });
+  let printWindow: BrowserWindow | undefined;
   try {
-    await printWindow.loadURL(`data:text/html;base64,${Buffer.from(preview.html).toString("base64")}`);
+    printWindow = new BrowserWindow({ show: false, webPreferences: { sandbox: true, contextIsolation: true, nodeIntegration: false } });
+    printWindow.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
+    await printWindow.loadFile(printHtmlPath);
     await printWindow.webContents.executeJavaScript("document.fonts.ready.then(() => true)");
-    const bytes = await printWindow.webContents.printToPDF(electronPrintOptions(profile));
+    const bytes = await printWindow.webContents.printToPDF(electronPrintOptions(project.profile));
     const validation = validatePdfBytes(bytes);
     if (!validation.ok) throw new Error(`PDF 导出验证失败：${validation.issues.map((issue) => issue.message).join("；")}`);
     atomicWrite(filePath, bytes);
     const contentHash = `sha256:${createHash("sha256").update(bytes).digest("hex")}`;
-    return { canceled: false, filePath, contentHash, validation, profile: profile.pdfProfile };
+    return { canceled: false, filePath, contentHash, validation, profile: project.profile.pdfProfile };
   } finally {
-    printWindow.destroy();
+    if (printWindow && !printWindow.isDestroyed()) printWindow.destroy();
+    unlinkSync(printHtmlPath);
   }
 }
 
@@ -189,6 +266,76 @@ function registerIpc(): void {
   ipcMain.handle("moxiao:workspace:save", (_event, value: unknown) => saveWorkspace(importLegacyWorkspace(value)));
   ipcMain.handle("moxiao:workspace:create-version", (_event, label: string) => activeStore().createSemanticVersion(WORKSPACE_ID, label));
   ipcMain.handle("moxiao:workspace:list-versions", () => activeStore().listSemanticVersions(WORKSPACE_ID));
+  ipcMain.handle("moxiao:workspace:restore-version", (_event, versionId: string) => {
+    if (typeof versionId !== "string" || !versionId) throw new Error("语义版本 ID 无效");
+    const current = loadWorkspace();
+    return activeStore().restoreSemanticVersion(WORKSPACE_ID, versionId, current.revision);
+  });
+  ipcMain.handle("moxiao:assistant:settings", () => activeAssistantService().settings());
+  ipcMain.handle("moxiao:assistant:save-settings", (_event, input: Parameters<AssistantService["saveSettings"]>[0]) => activeAssistantService().saveSettings(input));
+  ipcMain.handle("moxiao:assistant:runs", () => activeStore().listAssistantRuns(WORKSPACE_ID));
+  ipcMain.handle("moxiao:assistant:suggestions", () => activeStore().listAssistantSuggestions(WORKSPACE_ID));
+  ipcMain.handle("moxiao:assistant:run", async (_event, input: { recordIds: string[]; scope: "selected" | "filtered" }) => {
+    if (!input || !Array.isArray(input.recordIds) || !input.recordIds.length || input.recordIds.length > 500 || !(input.scope === "selected" || input.scope === "filtered")) throw new Error("智校运行范围无效");
+    const selectedIds = new Set(input.recordIds);
+    const records = loadWorkspace().records.filter((record) => selectedIds.has(record.id) && record.operation !== "delete");
+    if (records.length !== selectedIds.size) throw new Error("智校范围包含不存在的作品");
+    const result = await activeAssistantService().run(records, input.scope);
+    activeStore().saveAssistantRun(WORKSPACE_ID, result.run, result.suggestions);
+    return result;
+  });
+  ipcMain.handle("moxiao:assistant:decide", (_event, input: { suggestionId: string; decision: "accepted" | "rejected" }) => {
+    if (!input || typeof input.suggestionId !== "string" || !(input.decision === "accepted" || input.decision === "rejected")) throw new Error("智校决定无效");
+    const current = activeStore().listAssistantSuggestions(WORKSPACE_ID).find((item) => item.id === input.suggestionId);
+    if (!current) throw new Error("智校建议不存在");
+    let workspace = loadWorkspace();
+    if (input.decision === "accepted") {
+      try {
+        workspace = saveWorkspace(applyAssistantSuggestion(workspace, current));
+      } catch (error) {
+        const conflict = decideAssistantSuggestion(current, "conflict");
+        activeStore().updateAssistantSuggestion(WORKSPACE_ID, conflict);
+        throw error;
+      }
+    }
+    const suggestion = decideAssistantSuggestion(current, input.decision as Extract<AssistantSuggestionStatus, "accepted" | "rejected">);
+    activeStore().updateAssistantSuggestion(WORKSPACE_ID, suggestion);
+    return { suggestion, workspace };
+  });
+  ipcMain.handle("moxiao:publication:projects", () => {
+    loadPublicationProject();
+    return activeStore().listPublicationProjects<PublicationProject>(WORKSPACE_ID).map((project) => synchronizePublicationProject(validatePublicationProject(project), loadWorkspace()));
+  });
+  ipcMain.handle("moxiao:publication:project", (_event, projectId?: string) => loadPublicationProject(projectId));
+  ipcMain.handle("moxiao:publication:create-project", (_event, title: string) => {
+    if (typeof title !== "string" || !title.trim() || title.length > 300) throw new Error("新出版项目书名无效");
+    const project = { ...createDefaultPublicationProject(loadWorkspace(), new Date().toISOString(), createEntityId()), title: title.trim() };
+    return activeStore().savePublicationProject(WORKSPACE_ID, project.id, project);
+  });
+  ipcMain.handle("moxiao:publication:save-project", (_event, value: unknown) => savePublicationProject(value));
+  ipcMain.handle("moxiao:publication:generate-frontmatter", (_event, value: unknown) => savePublicationProject(generateFrontMatter(loadWorkspace(), validatePublicationProject(value))));
+  ipcMain.handle("moxiao:publication:propose-arrangement", (_event, value: unknown, strategy: ArrangementProposal["strategy"]) => {
+    if (!( ["genre", "chronology-asc", "chronology-desc", "mood", "hybrid"] as const).includes(strategy)) throw new Error("智能编排策略无效");
+    return proposeArrangement(loadWorkspace(), validatePublicationProject(value), strategy);
+  });
+  ipcMain.handle("moxiao:publication:select-asset", async (_event, input: { kind: PublicationAsset["kind"]; attachedRecordId?: string }) => {
+    if (!input || !(["cover", "illustration", "font", "ornament", "portrait"] as const).includes(input.kind)) throw new Error("资产类型无效");
+    const filters = input.kind === "font" ? [{ name: "字体", extensions: ["otf", "ttf", "woff", "woff2"] }] : [{ name: "图像", extensions: ["png", "jpg", "jpeg", "webp"] }];
+    let filePath = process.env.MOXIAO_E2E_ASSET_PATH;
+    if (!filePath) {
+      const selection = await dialog.showOpenDialog({ title: input.kind === "cover" ? "选择封面" : input.kind === "illustration" ? "选择插图" : "选择出版资产", properties: ["openFile"], filters });
+      if (selection.canceled || !selection.filePaths[0]) return { canceled: true };
+      filePath = selection.filePaths[0];
+    }
+    if (statSync(filePath).size > 12 * 1024 * 1024) throw new Error("单个出版资产超过 12 MB 安全上限");
+    const extension = filePath.split(".").pop()?.toLocaleLowerCase() ?? "";
+    const mediaType = ({ png: "image/png", jpg: "image/jpeg", jpeg: "image/jpeg", webp: "image/webp", otf: "font/otf", ttf: "font/ttf", woff: "font/woff", woff2: "font/woff2" } as Record<string, string>)[extension];
+    if (!mediaType) throw new Error("不支持的出版资产格式");
+    const bytes = readFileSync(filePath);
+    const id = createEntityId();
+    const dimensions = input.kind === "font" ? undefined : nativeImage.createFromBuffer(bytes).getSize();
+    return { canceled: false, asset: { id, kind: input.kind, fileName: filePath.split("/").pop()!, mediaType, dataUri: `data:${mediaType};base64,${bytes.toString("base64")}`, alt: "", rights: "unknown", ...(dimensions?.width && dimensions.height ? { pixelWidth: dimensions.width, pixelHeight: dimensions.height } : {}), ...(input.kind === "font" ? { fontFamily: `墨校字体-${id.slice(0, 8)}` } : {}), ...(input.attachedRecordId ? { attachedRecordId: input.attachedRecordId } : {}) } satisfies PublicationAsset };
+  });
 
   ipcMain.handle("moxiao:workspace:import", async () => {
     let filePath = process.env.MOXIAO_E2E_IMPORT_PATH;
@@ -249,6 +396,10 @@ function registerIpc(): void {
     workspace.records.push(...parsed.map((entry, index) => createNewRecord({ ...entry, sequence: first + index })));
     return saveWorkspace(workspace);
   });
+  ipcMain.handle("moxiao:workspace:batch-preview", (_event, input: { source: string; defaultForm: string }) => {
+    if (!input || typeof input.source !== "string" || typeof input.defaultForm !== "string" || input.source.length > 10_000_000 || !FORM_LABELS[input.defaultForm as keyof typeof FORM_LABELS]) throw new Error("批量补录参数无效或超过 10 MB 安全上限");
+    return parseBatchSource(input.source, input.defaultForm, FORM_LABELS);
+  });
 
   ipcMain.handle("moxiao:workspace:duplicates", () => {
     const workspace = loadWorkspace();
@@ -272,12 +423,13 @@ function registerIpc(): void {
     else workspace.records.splice(index, 1);
     return saveWorkspace(workspace);
   });
-  ipcMain.handle("moxiao:publication:preview", (_event, profile?: PublicationProfile) => publicationPreview(profile));
-  ipcMain.handle("moxiao:publication:export", (_event, profile: PublicationProfile) => exportPublication(profile));
+  ipcMain.handle("moxiao:publication:preview", (_event, project?: unknown) => publicationPreview(project));
+  ipcMain.handle("moxiao:publication:export", (_event, project: unknown) => exportPublication(project));
 }
 
 app.whenReady().then(() => {
   store = new WorkspaceStore(join(app.getPath("userData"), "moxiao.sqlite"));
+  assistantService = new AssistantService(app.getPath("userData"));
   if (!store.hasWorkspace(WORKSPACE_ID)) store.initializeWorkspace(WORKSPACE_ID, createDemoWorkspace());
   registerIpc();
   createWindow();
@@ -285,4 +437,4 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { store?.close(); store = null; });
+app.on("before-quit", () => { store?.close(); store = null; assistantService = null; });

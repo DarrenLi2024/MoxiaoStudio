@@ -1,6 +1,8 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { EditorialWorkspace } from "@moxiao/editorial";
-import type { PreflightResult, PublicationDocument, PublicationProfile, RendererCapabilities } from "@moxiao/publication";
+import type { AssistantProviderSettings, AssistantRun, AssistantRunResult, AssistantSuggestion } from "@moxiao/assistant";
+import type { SemanticVersionReceipt } from "@moxiao/storage";
+import type { ArrangementProposal, PreflightResult, PublicationAsset, PublicationDocument, PublicationProject, RendererCapabilities } from "@moxiao/publication";
 
 export interface MoxiaoRuntimeInfo {
   readonly platform: NodeJS.Platform;
@@ -16,7 +18,7 @@ export interface DuplicateView {
 }
 
 export interface PublicationPreviewView {
-  profile: PublicationProfile;
+  project: PublicationProject;
   document: PublicationDocument;
   html: string;
   preflight: PreflightResult;
@@ -28,7 +30,7 @@ export interface PublicationExportReceipt {
   filePath?: string;
   contentHash?: string;
   profile?: string;
-  validation?: { ok: boolean; pageCount: number; byteLength: number; issues: Array<{ severity: "error" | "warning"; code: string; message: string }> };
+  validation?: { ok: boolean; pageCount?: number; entryCount?: number; byteLength: number; issues: Array<{ severity: "error" | "warning"; code: string; message: string }> };
 }
 
 const api = {
@@ -40,12 +42,27 @@ const api = {
   clearWorkspace: (): Promise<unknown> => ipcRenderer.invoke("moxiao:workspace:clear"),
   addWork: (input: { title: string; form: string; body: string }): Promise<EditorialWorkspace> => ipcRenderer.invoke("moxiao:workspace:add", input),
   batchAdd: (input: { source: string; defaultForm: string }): Promise<EditorialWorkspace> => ipcRenderer.invoke("moxiao:workspace:batch-add", input),
+  previewBatch: (input: { source: string; defaultForm: string }): Promise<Array<{ title: string; form: string; body: string }>> => ipcRenderer.invoke("moxiao:workspace:batch-preview", input),
   duplicates: (): Promise<DuplicateView[]> => ipcRenderer.invoke("moxiao:workspace:duplicates"),
   resolveDuplicate: (removeId: string | null): Promise<EditorialWorkspace> => ipcRenderer.invoke("moxiao:workspace:resolve-duplicate", { removeId }),
   createVersion: (label: string): Promise<unknown> => ipcRenderer.invoke("moxiao:workspace:create-version", label),
-  listVersions: (): Promise<unknown> => ipcRenderer.invoke("moxiao:workspace:list-versions"),
-  publicationPreview: (profile?: PublicationProfile): Promise<PublicationPreviewView> => ipcRenderer.invoke("moxiao:publication:preview", profile),
-  exportPublication: (profile: PublicationProfile): Promise<PublicationExportReceipt> => ipcRenderer.invoke("moxiao:publication:export", profile)
+  listVersions: (): Promise<SemanticVersionReceipt[]> => ipcRenderer.invoke("moxiao:workspace:list-versions"),
+  restoreVersion: (versionId: string): Promise<EditorialWorkspace> => ipcRenderer.invoke("moxiao:workspace:restore-version", versionId),
+  assistantSettings: (): Promise<AssistantProviderSettings> => ipcRenderer.invoke("moxiao:assistant:settings"),
+  saveAssistantSettings: (input: { engine: AssistantProviderSettings["engine"]; endpoint: string; model: string; apiKey?: string; clearCredential?: boolean }): Promise<AssistantProviderSettings> => ipcRenderer.invoke("moxiao:assistant:save-settings", input),
+  assistantRuns: (): Promise<AssistantRun[]> => ipcRenderer.invoke("moxiao:assistant:runs"),
+  assistantSuggestions: (): Promise<AssistantSuggestion[]> => ipcRenderer.invoke("moxiao:assistant:suggestions"),
+  runAssistant: (input: { recordIds: string[]; scope: "selected" | "filtered" }): Promise<AssistantRunResult> => ipcRenderer.invoke("moxiao:assistant:run", input),
+  decideAssistantSuggestion: (input: { suggestionId: string; decision: "accepted" | "rejected" }): Promise<{ suggestion: AssistantSuggestion; workspace: EditorialWorkspace }> => ipcRenderer.invoke("moxiao:assistant:decide", input),
+  publicationProjects: (): Promise<PublicationProject[]> => ipcRenderer.invoke("moxiao:publication:projects"),
+  publicationProject: (projectId?: string): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:project", projectId),
+  createPublicationProject: (title: string): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:create-project", title),
+  savePublicationProject: (project: PublicationProject): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:save-project", project),
+  generatePublicationFrontMatter: (project: PublicationProject): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:generate-frontmatter", project),
+  proposePublicationArrangement: (project: PublicationProject, strategy: ArrangementProposal["strategy"]): Promise<PublicationProject> => ipcRenderer.invoke("moxiao:publication:propose-arrangement", project, strategy),
+  selectPublicationAsset: (input: { kind: PublicationAsset["kind"]; attachedRecordId?: string }): Promise<{ canceled: boolean; asset?: PublicationAsset }> => ipcRenderer.invoke("moxiao:publication:select-asset", input),
+  publicationPreview: (project?: PublicationProject): Promise<PublicationPreviewView> => ipcRenderer.invoke("moxiao:publication:preview", project),
+  exportPublication: (project: PublicationProject): Promise<PublicationExportReceipt> => ipcRenderer.invoke("moxiao:publication:export", project)
 };
 
 contextBridge.exposeInMainWorld("moxiao", api);

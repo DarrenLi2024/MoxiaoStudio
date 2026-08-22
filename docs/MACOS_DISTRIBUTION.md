@@ -5,6 +5,7 @@
 面向 GitHub 或官网直接下载的 macOS 应用必须同时满足：Developer ID Application 签名、Hardened Runtime、安全时间戳、Apple 公证、应用与 DMG 票据装订、Gatekeeper 验收。临时签名、Apple Development 签名和仅移除隔离属性都不属于公开发行方案。
 
 官方命令 `pnpm dist:mac` 采用失败关闭策略：缺少 Developer ID 或 notarytool 凭据时立即退出，不生成可误传的公开包。
+封装直接复用 pnpm 已安装并锁定版本的 `electron/dist`，避免 electron-builder 在发行阶段再次访问不稳定的远程 Electron 分发源；依赖目录缺失时仍会失败关闭。
 
 ## 一次性配置
 
@@ -33,7 +34,7 @@ pnpm dist:mac
 MOXIAO_SIGNING_IDENTITY="证书 SHA-1" pnpm dist:mac
 ```
 
-发布脚本会验证应用签名、团队 ID、安全时间戳和应用票据；随后使用同一 Developer ID 对 DMG 容器签名，再把签名后的最终字节提交公证、装订票据并执行 Gatekeeper 验收，最后生成独立 SHA-256 文件。DMG 必须遵循“签名 → 公证 → 装订”顺序，任一步失败都不得上传资产。
+发布脚本显式执行两阶段公证，不依赖 electron-builder 的隐式钥匙串读取：先生成并签名 `.app` 目录包，以 ZIP 提交 Apple，接受后为应用装订票据；再以已经装订的应用制作 DMG，使用同一 Developer ID 签名容器，把签名后的最终字节提交公证、装订票据并执行 Gatekeeper 验收，最后生成独立 SHA-256 文件。应用和 DMG 都必须遵循“签名 → 公证 → 装订”顺序，任一步失败都不得上传资产。
 
 ## 成品复验
 

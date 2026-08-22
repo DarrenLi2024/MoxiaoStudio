@@ -40,7 +40,18 @@ export interface ChronologyResearch {
 }
 
 export interface ReadingAnnotation {
+  id?: string;
   anchor: string;
+  anchorNodeId?: EntityId | null;
+  anchorQuote?: string | null;
+  note: string;
+  source?: string | null;
+  [key: string]: unknown;
+}
+
+export interface TextualNote {
+  id?: string;
+  title?: string | null;
   note: string;
   source?: string | null;
   [key: string]: unknown;
@@ -50,8 +61,9 @@ export interface CuratedReading {
   translation?: string | null;
   appreciation?: string | null;
   annotations?: ReadingAnnotation[];
-  textualNotes?: unknown[];
+  textualNotes?: TextualNote[];
   editionNote?: string | null;
+  reviewNote?: string | null;
   [key: string]: unknown;
 }
 

@@ -101,10 +101,43 @@ export function createWorkspace(scope: EditorialScope, records: EditorialRecord[
   return { format: "XZM-EW", version: "0.1", scope, createdAt: now, savedAt: null, revision: 0, records };
 }
 
+function normalizeLegacyTextualNotes(payload: EditorialPayload | undefined): boolean {
+  const notes = payload?.reading?.textualNotes as unknown;
+  if (!Array.isArray(notes)) return false;
+  let changed = false;
+  const normalized = notes.map((value) => {
+    if (typeof value === "string") {
+      changed = true;
+      return { note: value };
+    }
+    if (value && typeof value === "object") {
+      const note = value as Record<string, unknown>;
+      if (typeof note.note === "string") return value;
+      changed = true;
+      const legacyText = typeof note.text === "string" ? note.text : typeof note.content === "string" ? note.content : "";
+      return { ...note, note: legacyText };
+    }
+    changed = true;
+    return { note: value == null ? "" : String(value) };
+  });
+  if (changed) payload!.reading!.textualNotes = normalized;
+  return changed;
+}
+
+function normalizeLegacyRecord(record: Partial<EditorialRecord>): Partial<EditorialRecord> {
+  const operation = record.operation ?? "update";
+  const originalBaselineHash = record.baseline ? digest(record.baseline) : null;
+  if (operation !== "add" && originalBaselineHash !== record.sourceHash) return record;
+  const baselineChanged = normalizeLegacyTextualNotes(record.baseline);
+  normalizeLegacyTextualNotes(record.draft);
+  if (baselineChanged && operation !== "add" && record.baseline) record.sourceHash = digest(record.baseline);
+  return record;
+}
+
 export function importLegacyWorkspace(value: unknown): EditorialWorkspace {
   if (!value || typeof value !== "object") throw new Error("审校包不是对象");
   const source = structuredClone(value) as Partial<EditorialWorkspace> & { records?: Array<Partial<EditorialRecord>> };
-  const records = (source.records ?? []).map((record) => ({ ...record, entityId: record.entityId && isEntityId(record.entityId) ? record.entityId : createEntityId() }));
+  const records = (source.records ?? []).map((record) => normalizeLegacyRecord({ ...record, entityId: record.entityId && isEntityId(record.entityId) ? record.entityId : createEntityId() }));
   const workspace = {
     ...source,
     revision: Number.isInteger(source.revision) ? source.revision : 0,
@@ -170,7 +203,9 @@ export function auditPayload(payload: EditorialPayload, operation: EditorialOper
   for (const [index, annotation] of (payload.reading?.annotations ?? []).entries()) {
     if (!annotation.anchor.trim()) issues.push({ level: "error", message: `第${index + 1}条笺注缺少锚点` });
     else if (!body.includes(annotation.anchor)) issues.push({ level: "error", message: `笺注锚点“${annotation.anchor}”不在正文中` });
+    if (!annotation.note.trim()) issues.push({ level: "error", message: `第${index + 1}条笺注内容为空` });
   }
+  for (const [index, note] of (payload.reading?.textualNotes ?? []).entries()) if (!note.note?.trim()) issues.push({ level: "error", message: `第${index + 1}条校勘记内容为空` });
   return issues;
 }
 

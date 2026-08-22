@@ -11,6 +11,7 @@ packages/ontology     实体类型、关系词表与语义约束
 packages/publication  Publication IR、出版配置、渲染能力与预检
 packages/editorial    XZM-EW 兼容摄取、人工编校工作区、查重与安全合并
 packages/storage      SQLite 事务仓储、恢复日志、语义版本、墓碑与 Outbox
+packages/assistant    AI 建议协议、本地检查器、字段白名单与远端响应验证
 packages/xianxinzimo-adapter  闲心子墨资源与文枢工作区之间的只读防腐层
 ```
 
@@ -37,13 +38,31 @@ packages/xianxinzimo-adapter  闲心子墨资源与文枢工作区之间的只�
 
 SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义控制层，不要求 P0 引入图数据库。稳定实体采用关系表，稀疏和可扩展关系采用带证据、置信度与有效期的关系记录；交换层预留 JSON-LD。
 
+## 智校架构
+
+AI 是建议生产端，不是母本写入端。`AssistantRun` 保存引擎、模型、内容范围、输入哈希和完成状态，`AssistantSuggestion` 保存白名单字段补丁、基线值、理由、证据、置信度及人工决定。接受建议时重新读取当前母本并比较每个基线值；任何不一致都会产生冲突并要求重新扫描。
+
+默认引擎为完全离线的本地一致性检查器。OpenAI-compatible 连接仅在用户主动选择 BYOK 后启用：渲染进程只提交运行范围，主进程读取系统安全存储中的密钥并执行 HTTPS 请求；localhost 可显式使用 HTTP。数据库、导出包与日志都不保存明文密钥或完整请求正文。
+
 ## 出版架构
 
 所有导出先生成与界面无关的 `PublicationDocument`，再应用 `PublicationProfile`。每个渲染适配器声明 `RendererCapabilities`；预检不通过时不得静默导出。
 
+桌面实时预览使用沙箱 `iframe srcDoc`，出版样式表以固定受控 nonce 同时通过父页面与子文档 CSP；不允许用全局 `unsafe-inline` 绕过安全边界，图片焦点等动态样式必须汇总为样式类。端到端门禁须断言 `document.styleSheets` 已挂载并核对计算样式，不能只检查生成 HTML 字符串。
+
+`PublicationProject` 位于活母本与 `PublicationDocument` 之间，当前格式为 1.3，独立保存书名、篇目收录、作者编定顺序、多体裁/系年筛选、电子书兼容配置、前置页事实、编校信息策略、媒体位置、主题、语义样式表与开本版心。空 `genreFilters` 表示全部体裁；1.0—1.2 项目在读取时确定性迁移，旧版诗词 13pt/2 倍行距会显式写入 `verse-body`，保证升级前后视觉一致。出版项目不得改写作品 `seq`；多部书稿可以引用同一作品表达。生成成品时锁定项目、母本修订和表达哈希，形成新的 `Manifestation`。
+
+语义样式表以 `base` 为根，覆盖书名、署名、篇章标题、诗词/散文正文、创作题注、译文、笺注、赏析、图注、目录、版权、前言、作者简介、校勘附录和页眉页脚等 21 类角色。每个角色保存本地属性、继承来源与属性级锁；有效样式按“基准—角色—目标适配”确定性合并。主题仅是样式预设，切换时更新未锁定属性，不得覆盖用户锁定值。PDF 与 EPUB 消费同一语义样式表，适配器只处理固定版与可重排版的真实差异。
+
+智能编排只生成可解释候选，篇目可以锁定位置，应用前保存旧顺序并可撤销。意境标签由当前正文、题注和赏析确定性推断，不写回作品事实层。媒体资产与摆放位置分离，同一图片可以在多个篇目复用；移除篇目位置不删除图库原图。`PublicationDocument` 使用 `cover`、`copyright`、`foreword`、`toc`、`chapter`、`author-bio`、`apparatus` 等语义角色，PDF、EPUB 和内容包不得各自重新推导成书内容。
+
+预检问题携带素材、篇章与修正步骤定位；界面按素材 ID 归并同图多处引用，只修改一次即可覆盖全部摆放。系统可以基于题名和图注生成替代文字草稿，但不得推断图片使用权，权属仍须由用户明确选择。
+
 默认开源渲染路径计划使用 Vivliostyle；专业印刷可选接入受许可的 Prince 或出版社指定引擎。PDF、EPUB、DOCX、Web 和闲心子墨内容包均消费同一 Publication IR。
 
 桌面端首个内置适配器使用 Electron Chromium 生成通用 Tagged PDF，实际支持文字水印、页眉页脚、页码、A4/A5/B5 和自定义尺寸。PDF/X、PDF/A、PDF/UA、CMYK、出血裁切和左右页镜像边距只有在适配器明确声明能力时才能启用；内置适配器不会虚报。详细边界见 [docs/PUBLICATION.md](docs/PUBLICATION.md)。
+
+内置 EPUB 3.3 适配器生成可重排电子书，包含 OPF、清单、`spine`、导航与正文地标、XHTML 章节、保守响应式 CSS、版权和基础无障碍发现元数据，以及经权利确认的图片/字体。PDF 专属的页眉页脚、水印、固定页码和印刷参数不会写入 EPUB，也不会误阻断电子书导出。Apple Books 与中文阅读器兼容配置仍共享标准 EPUB 基线，平台差异通过预检和后续适配器扩展。闲心子墨和 WebPub 先输出结构化暂存包，保留快照哈希与能力声明，不直接覆盖目标客户端。
 
 闲心子墨适配器按文件哈希摄取作品、笺读、语境校音、朗读轨与媒体清单，并提供从 App 资源到文枢工作区再回到原资源结构的语义往返。适配器不直接写 iOS 仓库；交付包、媒体权利与验证流程见 [docs/XIANXINZIMO_ADAPTER.md](docs/XIANXINZIMO_ADAPTER.md)。
 
