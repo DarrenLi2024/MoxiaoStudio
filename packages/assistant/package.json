@@ -1,0 +1,17 @@
+{
+  "name": "@moxiao/assistant",
+  "version": "0.1.0",
+  "private": true,
+  "license": "MPL-2.0",
+  "type": "module",
+  "exports": "./src/index.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run --root ../.. packages/assistant/src/assistant.test.ts"
+  },
+  "dependencies": {
+    "@moxiao/domain": "workspace:*",
+    "@moxiao/editorial": "workspace:*"
+  }
+}
