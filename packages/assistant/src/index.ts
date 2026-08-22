@@ -86,6 +86,16 @@ export const assistantFieldPaths: readonly AssistantFieldPath[] = [
   "draft.reading.translation", "draft.reading.appreciation"
 ];
 
+export function validateAssistantEndpoint(value: string): string {
+  if (!value.trim() || value.length > 2_048) throw new Error("模型端点为空或过长");
+  let url: URL;
+  try { url = new URL(value); } catch { throw new Error("模型端点不是有效 URL"); }
+  if (url.username || url.password || url.hash) throw new Error("模型端点不得包含凭据或片段");
+  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
+  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw new Error("模型端点必须使用 HTTPS；仅本机服务允许 HTTP");
+  return url.toString();
+}
+
 const fieldPathSet = new Set<string>(assistantFieldPaths);
 const formPrefixes = [
   ["七绝", "qijue"], ["五绝", "wujue"], ["七律", "qilv"], ["五律", "wulv"], ["新诗", "xinshi"], ["散文", "sanwen"], ["随笔", "suibi"]
@@ -157,7 +167,7 @@ export function scanLocalEditorial(records: readonly EditorialRecord[], scope: A
 }
 
 function isScalar(value: unknown): value is AssistantScalar {
-  return value === null || typeof value === "string" || typeof value === "number";
+  return value === null || (typeof value === "string" && value.length <= 2_000_000) || (typeof value === "number" && Number.isFinite(value));
 }
 
 export function validateRemoteSuggestionPayload(value: unknown, records: readonly EditorialRecord[], runId: string, now = new Date().toISOString()): AssistantSuggestion[] {
@@ -180,7 +190,7 @@ export function validateRemoteSuggestionPayload(value: unknown, records: readonl
       if (scalarAt(record, path) !== candidate.before) throw new Error(`第 ${index + 1} 项建议基线与当前母本不一致`);
       return { path, before: candidate.before, after: candidate.after };
     });
-    const evidence = Array.isArray(draft.evidence) && draft.evidence.every((entry) => typeof entry === "string") ? draft.evidence.slice(0, 8) as string[] : [];
+    const evidence = Array.isArray(draft.evidence) && draft.evidence.every((entry) => typeof entry === "string" && entry.length <= 1_000) ? draft.evidence.slice(0, 8) as string[] : [];
     return suggestion(runId, record, draft.kind, draft.summary.trim(), draft.reason.trim(), draft.confidence, evidence, patches, now);
   });
 }
@@ -200,4 +210,3 @@ export function decideAssistantSuggestion(value: AssistantSuggestion, status: Ex
   if (value.status !== "pending") throw new Error("建议已经处理");
   return { ...value, status, decidedAt: now };
 }
-

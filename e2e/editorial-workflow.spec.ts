@@ -109,6 +109,52 @@ test("首次安装的演示区自动保存后仍可恢复全量备份", async ()
   }
 });
 
+test("智校建议经人工接受才写入母本，批量补录先预览后入库", async () => {
+  mkdirSync(artifacts, { recursive: true });
+  const application = await electron.launch({
+    args: [resolve("apps/desktop/out/main/index.js")],
+    env: { ...process.env, MOXIAO_PROFILE: `assistant-${process.pid}-${Date.now()}`, MOXIAO_THEME: "light" }
+  });
+  try {
+    const page = await application.firstWindow();
+    await expect(page.getByRole("heading", { name: "一卷通校" })).toBeVisible();
+    await page.evaluate(async () => { await window.moxiao!.addWork({ title: "七绝·智校试作", form: "sanwen", body: "江上清风来。" }); });
+    await page.reload();
+    await page.getByRole("listbox", { name: "作品列表" }).getByText("七绝·智校试作", { exact: true }).click();
+    await page.getByRole("button", { name: "智校" }).click();
+    const assistant = page.getByRole("dialog", { name: "智校工作台" });
+    await expect(assistant).toBeVisible();
+    await expect(assistant.getByText("完全离线 · 不发送正文")).toBeVisible();
+    await assistant.getByRole("button", { name: "开始结构化智校" }).click();
+    await expect(assistant.getByText("体裁与题名标识不一致").first()).toBeVisible();
+    await page.screenshot({ path: join(artifacts, "assistant-workbench.png"), fullPage: true });
+    const before = await page.evaluate(async () => (await window.moxiao!.loadWorkspace()).records.find((record) => record.draft.work.title === "七绝·智校试作")?.draft.work.form);
+    expect(before).toBe("sanwen");
+    await assistant.getByRole("button", { name: "接受并写入母本" }).click();
+    await expect(assistant.getByText("建议已写入母本并记录为普通修订")).toBeVisible();
+    const after = await page.evaluate(async () => (await window.moxiao!.loadWorkspace()).records.find((record) => record.draft.work.title === "七绝·智校试作")?.draft.work.form);
+    expect(after).toBe("qijue");
+    await assistant.getByRole("button", { name: "关闭智校工作台" }).click();
+
+    await page.getByRole("button", { name: "批量补录" }).click();
+    const batch = page.getByRole("dialog", { name: "批量补录" });
+    await batch.getByLabel("批量文本").fill("《暂存甲》\n第一篇正文\n---\n《暂存乙》\n第二篇正文");
+    await batch.getByRole("button", { name: "解析并预览" }).click();
+    await expect(batch.getByText("2 篇 · 尚未写入母本")).toBeVisible();
+    expect(await page.evaluate(async () => (await window.moxiao!.loadWorkspace()).records.some((record) => record.draft.work.title === "暂存甲"))).toBe(false);
+    await batch.getByRole("button", { name: "确认补录 2 篇" }).click();
+    await expect(page.getByRole("listbox", { name: "作品列表" }).getByText("暂存甲", { exact: true })).toBeVisible();
+
+    await page.getByRole("button", { name: /生成版本/u }).click();
+    await page.getByRole("button", { name: "版本", exact: true }).click();
+    const versions = page.getByRole("dialog", { name: "版本中心" });
+    await expect(versions.getByText("不可变语义版本")).toBeVisible();
+    await expect(versions.getByRole("button", { name: "恢复为当前母本" })).toBeVisible();
+  } finally {
+    await application.close();
+  }
+});
+
 test("出版中心可预检水印页眉页脚并生成有效 PDF", async () => {
   test.setTimeout(120_000);
   mkdirSync(artifacts, { recursive: true });
@@ -209,6 +255,12 @@ test("笺读编校在窄屏深色与减弱动态效果下保持可用", async ()
     await expect(page.getByLabel("今译")).toBeVisible();
     await expect(page.getByText("正文参照", { exact: true })).toBeVisible();
     await page.screenshot({ path: join(artifacts, "reading-editor-dark-narrow.png"), fullPage: true });
+    await page.getByRole("button", { name: "智校" }).click();
+    const assistant = page.getByRole("dialog", { name: "智校工作台" });
+    await expect(assistant).toBeVisible();
+    expect(await assistant.evaluate((element) => element.scrollWidth <= element.clientWidth + 1)).toBe(true);
+    await page.screenshot({ path: join(artifacts, "assistant-dark-narrow.png"), fullPage: true });
+    await assistant.getByRole("button", { name: "关闭智校工作台" }).click();
     await application.evaluate(({ BrowserWindow }) => BrowserWindow.getAllWindows()[0]?.webContents.setZoomFactor(1.15));
     await page.getByRole("button", { name: "出版", exact: true }).first().click();
     const publication = page.getByRole("dialog", { name: "出版中心" });

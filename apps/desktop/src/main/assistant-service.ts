@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { safeStorage } from "electron";
 import { createEntityId } from "@moxiao/domain";
 import { digest, stableStringify, type EditorialRecord } from "@moxiao/editorial";
-import { scanLocalEditorial, validateRemoteSuggestionPayload, type AssistantProviderSettings, type AssistantRun, type AssistantRunResult } from "@moxiao/assistant";
+import { scanLocalEditorial, validateAssistantEndpoint, validateRemoteSuggestionPayload, type AssistantProviderSettings, type AssistantRun, type AssistantRunResult } from "@moxiao/assistant";
 
 interface StoredSettings {
   readonly engine: AssistantProviderSettings["engine"];
@@ -12,16 +12,6 @@ interface StoredSettings {
 }
 
 const defaultSettings: StoredSettings = { engine: "local-rules", endpoint: "https://api.openai.com/v1/chat/completions", model: "gpt-5-mini" };
-
-export function validateAssistantEndpoint(value: string): string {
-  if (!value.trim() || value.length > 2_048) throw new Error("模型端点为空或过长");
-  let url: URL;
-  try { url = new URL(value); } catch { throw new Error("模型端点不是有效 URL"); }
-  if (url.username || url.password || url.hash) throw new Error("模型端点不得包含凭据或片段");
-  const local = url.hostname === "localhost" || url.hostname === "127.0.0.1" || url.hostname === "::1";
-  if (url.protocol !== "https:" && !(local && url.protocol === "http:")) throw new Error("模型端点必须使用 HTTPS；仅本机服务允许 HTTP");
-  return url.toString();
-}
 
 function atomicWrite(path: string, bytes: string | Uint8Array): void {
   const temporary = `${path}.${process.pid}.tmp`;
@@ -95,7 +85,10 @@ export class AssistantService {
       signal: AbortSignal.timeout(90_000)
     });
     if (!response.ok) throw new Error(`模型服务请求失败（HTTP ${response.status}）`);
-    const envelope = await response.json() as { choices?: Array<{ message?: { content?: string } }> };
+    const responseText = await response.text();
+    if (responseText.length > 5_000_000) throw new Error("模型响应超过 5 MB 安全上限");
+    let envelope: { choices?: Array<{ message?: { content?: string } }> };
+    try { envelope = JSON.parse(responseText) as typeof envelope; } catch { throw new Error("模型服务响应不是有效 JSON"); }
     const content = envelope.choices?.[0]?.message?.content;
     if (!content) throw new Error("模型服务没有返回可解析内容");
     let parsed: unknown;

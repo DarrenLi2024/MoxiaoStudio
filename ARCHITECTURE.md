@@ -11,6 +11,7 @@ packages/ontology     实体类型、关系词表与语义约束
 packages/publication  Publication IR、出版配置、渲染能力与预检
 packages/editorial    XZM-EW 兼容摄取、人工编校工作区、查重与安全合并
 packages/storage      SQLite 事务仓储、恢复日志、语义版本、墓碑与 Outbox
+packages/assistant    AI 建议协议、本地检查器、字段白名单与远端响应验证
 packages/xianxinzimo-adapter  闲心子墨资源与文枢工作区之间的只读防腐层
 ```
 
@@ -36,6 +37,12 @@ packages/xianxinzimo-adapter  闲心子墨资源与文枢工作区之间的只�
 ## Ontology
 
 SQLite/PostgreSQL 将继续承担事务事实源。Ontology 是版本化语义控制层，不要求 P0 引入图数据库。稳定实体采用关系表，稀疏和可扩展关系采用带证据、置信度与有效期的关系记录；交换层预留 JSON-LD。
+
+## 智校架构
+
+AI 是建议生产端，不是母本写入端。`AssistantRun` 保存引擎、模型、内容范围、输入哈希和完成状态，`AssistantSuggestion` 保存白名单字段补丁、基线值、理由、证据、置信度及人工决定。接受建议时重新读取当前母本并比较每个基线值；任何不一致都会产生冲突并要求重新扫描。
+
+默认引擎为完全离线的本地一致性检查器。OpenAI-compatible 连接仅在用户主动选择 BYOK 后启用：渲染进程只提交运行范围，主进程读取系统安全存储中的密钥并执行 HTTPS 请求；localhost 可显式使用 HTTP。数据库、导出包与日志都不保存明文密钥或完整请求正文。
 
 ## 出版架构
 

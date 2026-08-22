@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createNewRecord, createWorkspace } from "@moxiao/editorial";
-import { applyAssistantSuggestion, scanLocalEditorial, validateRemoteSuggestionPayload } from "./index";
+import { applyAssistantSuggestion, scanLocalEditorial, validateAssistantEndpoint, validateRemoteSuggestionPayload } from "./index";
 
 describe("智校建议协议", () => {
   it("识别题名体裁、系年结构和失配笺注，但不直接修改母本", () => {
@@ -30,5 +30,12 @@ describe("智校建议协议", () => {
     const base = { recordId: record.id, kind: "copyedit", summary: "修正", reason: "理由", confidence: 0.8, evidence: [], patches: [] };
     expect(() => validateRemoteSuggestionPayload([{ ...base, patches: [{ path: "operation", before: "add", after: "delete" }] }], [record], "run")).toThrow("越权");
     expect(() => validateRemoteSuggestionPayload([{ ...base, patches: [{ path: "draft.work.title", before: "错误基线", after: "新题" }] }], [record], "run")).toThrow("基线");
+  });
+
+  it("远端只允许 HTTPS，本机模型可显式使用 HTTP", () => {
+    expect(validateAssistantEndpoint("https://api.example.com/v1/chat/completions")).toBe("https://api.example.com/v1/chat/completions");
+    expect(validateAssistantEndpoint("http://localhost:11434/v1/chat/completions")).toBe("http://localhost:11434/v1/chat/completions");
+    expect(() => validateAssistantEndpoint("http://example.com/v1")).toThrow("HTTPS");
+    expect(() => validateAssistantEndpoint("https://secret@example.com/v1")).toThrow("凭据");
   });
 });

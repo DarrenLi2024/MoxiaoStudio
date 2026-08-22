@@ -3,13 +3,10 @@ import {
   Archive,
   BookOpenText,
   Check,
-  ChevronDown,
   CircleAlert,
-  CircleHelp,
   Command,
   FileOutput,
   Filter,
-  GalleryVerticalEnd,
   GripVertical,
   History,
   ImagePlus,
@@ -24,16 +21,17 @@ import {
   Sparkles,
   Undo2,
   Upload,
-  UsersRound,
   X
 } from "lucide-react";
 import type { EditorialRecord, EditorialWorkspace, ReviewStatus } from "@moxiao/editorial";
 import { ontologyVersion } from "@moxiao/ontology";
 import { applyArrangementProposal, applyThemeToStyleSheet, compareLiteraryForms, createDefaultLayoutSpecification, createStyleSheetFromTheme, literaryFormLabel, literaryFormLabels, publicationThemes, renderPublicationHtml, resolveSemanticStyle, restoreArrangement, semanticStyleRoleLabels, semanticStyleRoles, setStyleProperty, stylePropertyLabels, toggleStylePropertyLock, type ArrangementProposal, type PreflightIssue, type PublicationAsset, type PublicationAssetDeclaration, type PublicationDocument, type PublicationProject, type SemanticStyleRole, type StyleProperties, type StylePropertyKey } from "@moxiao/publication";
 import type { DuplicateView } from "../../preload";
+import type { SemanticVersionReceipt } from "@moxiao/storage";
+import { AssistantWorkbench } from "./AssistantWorkbench";
 
 type SaveMode = "loading" | "saved" | "dirty" | "saving" | "error" | "conflict";
-type DialogMode = "new" | "batch" | "duplicates" | "publication" | null;
+type DialogMode = "new" | "batch" | "duplicates" | "versions" | "assistant" | "publication" | null;
 type EditorMode = "manuscript" | "reading";
 type PublicationStep = "book" | "arrange" | "frontmatter" | "style" | "media" | "export";
 type PreviewDevice = "page" | "tablet" | "phone";
@@ -41,10 +39,9 @@ type NumericStyleKey = "fontSizePt" | "lineHeight" | "letterSpacingEm" | "textIn
 
 const railItems = [
   { label: "文库", icon: LibraryBig, active: true },
+  { label: "智校", icon: Sparkles },
   { label: "版本", icon: History },
-  { label: "出版", icon: FileOutput },
-  { label: "资源", icon: GalleryVerticalEnd },
-  { label: "协作", icon: UsersRound }
+  { label: "出版", icon: FileOutput }
 ] as const;
 
 const formLabels = literaryFormLabels;
@@ -99,6 +96,8 @@ export function App() {
   const [newForm, setNewForm] = useState("xinshi");
   const [newBody, setNewBody] = useState("");
   const [batchSource, setBatchSource] = useState("");
+  const [batchPreview, setBatchPreview] = useState<Array<{ title: string; form: string; body: string }> | null>(null);
+  const [versions, setVersions] = useState<SemanticVersionReceipt[]>([]);
   const [publicationProject, setPublicationProject] = useState<PublicationProject | null>(null);
   const [publicationProjects, setPublicationProjects] = useState<PublicationProject[]>([]);
   const [publicationHtml, setPublicationHtml] = useState("");
@@ -112,6 +111,7 @@ export function App() {
   const [selectedStyleRole, setSelectedStyleRole] = useState<SemanticStyleRole>("verse-body");
   const editCounter = useRef(0);
   const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const searchInput = useRef<HTMLInputElement | null>(null);
 
   useEffect(() => {
     let active = true;
@@ -127,6 +127,18 @@ export function App() {
       setSaveError(error instanceof Error ? error.message : String(error));
     });
     return () => { active = false; };
+  }, []);
+
+  useEffect(() => {
+    const focusSearch = (event: KeyboardEvent) => {
+      if ((event.metaKey || event.ctrlKey) && event.key.toLocaleLowerCase() === "k") {
+        event.preventDefault();
+        setDialogMode(null);
+        searchInput.current?.focus();
+      }
+    };
+    window.addEventListener("keydown", focusSearch);
+    return () => window.removeEventListener("keydown", focusSearch);
   }, []);
 
   useEffect(() => {
@@ -236,6 +248,25 @@ export function App() {
       setDialogMode("publication");
     } finally {
       setPublicationBusy(false);
+    }
+  }
+
+  async function openVersions(): Promise<void> {
+    try {
+      setVersions(await window.moxiao!.listVersions());
+      setDialogMode("versions");
+    } catch (error) {
+      setSaveMode("error");
+      setSaveError(error instanceof Error ? error.message : String(error));
+    }
+  }
+
+  async function previewBatchImport(): Promise<void> {
+    try {
+      setBatchPreview(await window.moxiao!.previewBatch({ source: batchSource, defaultForm: newForm }));
+    } catch (error) {
+      setSaveMode("error");
+      setSaveError(error instanceof Error ? error.message : String(error));
     }
   }
 
@@ -473,27 +504,26 @@ export function App() {
           {railItems.map((item) => {
             const Icon = item.icon;
             return (
-            <button className={`rail-button ${"active" in item && item.active ? "is-active" : ""}`} aria-label={item.label} key={item.label} onClick={item.label === "出版" ? () => void openPublication() : undefined}>
+            <button className={`rail-button ${"active" in item && item.active ? "is-active" : ""}`} aria-label={item.label} key={item.label} onClick={item.label === "出版" ? () => void openPublication() : item.label === "智校" ? () => setDialogMode("assistant") : item.label === "版本" ? () => void openVersions() : undefined}>
               <Icon size={20} strokeWidth={1.7} /><span>{item.label}</span>
             </button>
           );})}
         </nav>
         <div className="rail-footer">
-          <button className="icon-button" aria-label="帮助"><CircleHelp size={19} /></button>
-          <button className="icon-button" aria-label="设置"><Settings size={19} /></button>
+          <button className="icon-button" aria-label="设置" onClick={() => setDialogMode("assistant")}><Settings size={19} /></button>
         </div>
       </aside>
 
       <section className="library-panel" aria-label="作品目录">
         <header className="project-header">
-          <div><span className="context-label">当前项目</span><button className="project-switcher">本地文学项目 <ChevronDown size={14} /></button></div>
+          <div><span className="context-label">当前项目</span><span className="project-switcher">本地文学项目</span></div>
           <button className="icon-button bordered" aria-label="导入作品" onClick={() => void refreshWorkspace(() => window.moxiao!.importWorkspace())}><Upload size={17} /></button>
         </header>
         <div className="library-heading">
           <div><h1>一卷通校</h1><p>{records.length} 篇作品 · {records.filter((record) => record.editorState.status === "reviewed").length} 篇已复校</p></div>
           <button className="icon-button" aria-label="查重" onClick={() => void openDuplicateDialog()}><ListFilter size={18} /></button>
         </div>
-        <label className="search-field"><Search size={16} aria-hidden="true" /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索题名、正文或系年" /><kbd>⌘K</kbd></label>
+        <label className="search-field"><Search size={16} aria-hidden="true" /><input ref={searchInput} value={query} onChange={(event) => setQuery(event.target.value)} placeholder="搜索题名、正文或系年" /><kbd>⌘K</kbd></label>
         <div className="filter-row filter-row-wrap">
           <select aria-label="按体裁筛选" value={formFilter} onChange={(event) => setFormFilter(event.target.value)}>
             <option value="all">全部体裁（{records.length}）</option>
@@ -513,7 +543,7 @@ export function App() {
           ))}
           {!filteredRecords.length && <div className="empty-list"><strong>没有匹配作品</strong><button onClick={() => { setQuery(""); setFormFilter("all"); setStatusFilter("all"); setChangedOnly(false); }}>清除筛选</button></div>}
         </div>
-        <div className="library-actions"><button onClick={() => setDialogMode("new")}>＋ 新增作品</button><button onClick={() => setDialogMode("batch")}>批量补录</button></div>
+        <div className="library-actions"><button onClick={() => setDialogMode("new")}>＋ 新增作品</button><button onClick={() => { setBatchPreview(null); setDialogMode("batch"); }}>批量补录</button></div>
         <button className="clear-workspace-button" onClick={() => {
           if (window.confirm("将先要求保存完整 JSON 备份，再清空当前文稿。是否继续？")) {
             void refreshWorkspace(() => window.moxiao!.clearWorkspace());
@@ -577,30 +607,32 @@ export function App() {
             <label>创作时间<input value={selected.draft.chronologyResearch.display} onChange={(event) => mutateSelected((record) => { record.draft.chronologyResearch.display = event.target.value; })} placeholder="未系年" /></label>
             <label>审校状态<select value={selected.editorState.status} onChange={(event) => mutateSelected((record) => { record.editorState.status = event.target.value as ReviewStatus; })}><option value="pending">待审校</option><option value="editing">编校中</option><option value="reviewed">已复校</option></select></label>
           </section>
-          <section className="inspector-section"><div className="section-title-row"><h3>证据与置信度</h3><button>添加</button></div><div className="evidence-card"><span className="evidence-mark">据</span><div><strong>{selected.draft.chronologyResearch.basis.length} 条系年证据</strong><p>{selected.draft.chronologyResearch.editorialNote || "尚未记录编校说明"}</p></div><span className="confidence">{selected.draft.chronologyResearch.certainty === "authorConfirmed" ? "作者确认" : "待核"}</span></div></section>
+          <section className="inspector-section"><div className="section-title-row"><h3>证据与置信度</h3><span>随系年编校记录</span></div><div className="evidence-card"><span className="evidence-mark">据</span><div><strong>{selected.draft.chronologyResearch.basis.length} 条系年证据</strong><p>{selected.draft.chronologyResearch.editorialNote || "尚未记录编校说明"}</p></div><span className="confidence">{selected.draft.chronologyResearch.certainty === "authorConfirmed" ? "作者确认" : "待核"}</span></div></section>
           <section className="inspector-section"><h3>关系</h3><div className="relation-row"><span>内部实体</span><strong>{selected.entityId.slice(0, 8)}</strong></div><div className="relation-row"><span>操作状态</span><strong>{selected.operation ?? "update"}</strong></div><div className="relation-row"><span>人工变化</span><strong className={changed(selected) ? "warning-text" : ""}>{changed(selected) ? "有" : "无"}</strong></div></section>
           <section className="inspector-section danger-zone"><h3>作品治理</h3><button onClick={() => void refreshWorkspace(async () => { await window.moxiao!.resolveDuplicate(selected.id); })}>标记删除当前作品</button></section>
         </> : <div className="inspector-empty">导入或新增作品后显示语义属性。</div>}
         <footer className="ontology-footnote"><Command size={15} /> {ontologyVersion}</footer>
       </aside>
 
-      <footer className="statusbar"><span><span className="online-dot" /> {runtimeLabel}</span><span>SQLite · WAL</span><span>修订 {workspace.revision}</span><span>{records.length} 篇 · 已删除 {workspace.records.length - records.length}</span><button><Command size={13} /> 命令</button></footer>
+      <footer className="statusbar"><span><span className="online-dot" /> {runtimeLabel}</span><span>SQLite · WAL</span><span>修订 {workspace.revision}</span><span>{records.length} 篇 · 已删除 {workspace.records.length - records.length}</span><button onClick={() => searchInput.current?.focus()}><Command size={13} /> 搜索</button></footer>
 
       {dialogMode && <div className="dialog-backdrop" role="presentation">
-        <section className={`work-dialog ${dialogMode === "duplicates" ? "duplicate-dialog" : dialogMode === "publication" ? "publication-dialog" : ""}`} role="dialog" aria-modal="true" aria-label={{ new: "新增作品", batch: "批量补录", duplicates: "作品查重", publication: "出版中心" }[dialogMode]}>
-          <header><div><span className="context-label">本地工作区</span><h2>{{ new: "新增作品", batch: "批量补录", duplicates: "作品查重", publication: "出版中心" }[dialogMode]}</h2></div><button className="icon-button" onClick={() => setDialogMode(null)} aria-label="关闭"><X size={18} /></button></header>
+        {dialogMode === "assistant" ? <AssistantWorkbench records={records} selectedId={selected?.id ?? null} filteredIds={filteredRecords.map((record) => record.id)} onWorkspace={(next) => { setWorkspace(next); setSaveMode("saved"); }} onClose={() => setDialogMode(null)} /> : <section className={`work-dialog ${dialogMode === "duplicates" ? "duplicate-dialog" : dialogMode === "versions" ? "version-dialog" : dialogMode === "publication" ? "publication-dialog" : ""}`} role="dialog" aria-modal="true" aria-label={{ new: "新增作品", batch: "批量补录", duplicates: "作品查重", versions: "版本中心", publication: "出版中心" }[dialogMode]}>
+          <header><div><span className="context-label">本地工作区</span><h2>{{ new: "新增作品", batch: "批量补录", duplicates: "作品查重", versions: "版本中心", publication: "出版中心" }[dialogMode]}</h2></div><button className="icon-button" onClick={() => setDialogMode(null)} aria-label="关闭"><X size={18} /></button></header>
           {dialogMode === "new" && <form onSubmit={(event) => { event.preventDefault(); void refreshWorkspace(() => window.moxiao!.addWork({ title: newTitle, form: newForm, body: newBody })).then(() => { setDialogMode(null); setNewTitle(""); setNewBody(""); }); }}>
             <label>作品题名<input required value={newTitle} onChange={(event) => setNewTitle(event.target.value)} /></label>
             <label>体裁<select value={newForm} onChange={(event) => setNewForm(event.target.value)}>{Object.entries(formLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
             <label>正文<textarea required value={newBody} onChange={(event) => setNewBody(event.target.value)} /></label>
             <footer><button type="button" className="quiet-button" onClick={() => setDialogMode(null)}>取消</button><button className="primary-button">建立草稿</button></footer>
           </form>}
-          {dialogMode === "batch" && <form onSubmit={(event) => { event.preventDefault(); void refreshWorkspace(() => window.moxiao!.batchAdd({ source: batchSource, defaultForm: newForm })).then(() => { setDialogMode(null); setBatchSource(""); }); }}>
-            <label>默认体裁<select value={newForm} onChange={(event) => setNewForm(event.target.value)}>{Object.entries(formLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
-            <label>批量文本<textarea required className="batch-area" value={batchSource} onChange={(event) => setBatchSource(event.target.value)} placeholder={'《第一篇》\n体裁：七绝\n正文……\n---\n第二篇\n正文……'} /></label>
+          {dialogMode === "batch" && <form onSubmit={(event) => { event.preventDefault(); if (!batchPreview) { void previewBatchImport(); return; } void refreshWorkspace(() => window.moxiao!.batchAdd({ source: batchSource, defaultForm: newForm })).then(() => { setDialogMode(null); setBatchSource(""); setBatchPreview(null); }); }}>
+            <label>默认体裁<select value={newForm} onChange={(event) => { setNewForm(event.target.value); setBatchPreview(null); }}>{Object.entries(formLabels).map(([value, label]) => <option value={value} key={value}>{label}</option>)}</select></label>
+            <label>批量文本<textarea required className="batch-area" value={batchSource} onChange={(event) => { setBatchSource(event.target.value); setBatchPreview(null); }} placeholder={'《第一篇》\n体裁：七绝\n正文……\n---\n第二篇\n正文……'} /></label>
             <p className="dialog-help">使用单独一行 <code>---</code> 分隔作品；第一行作为题名，可用“体裁：七绝”覆盖默认体裁。</p>
-            <footer><button type="button" className="quiet-button" onClick={() => setDialogMode(null)}>取消</button><button className="primary-button">智能拆分并补录</button></footer>
+            {batchPreview && <section className="batch-preview" aria-label="批量解析预览"><header><strong>解析暂存区</strong><span>{batchPreview.length} 篇 · 尚未写入母本</span></header>{batchPreview.map((item, index) => <div key={`${item.title}-${index}`}><b>{index + 1}</b><span><strong>{item.title}</strong><small>{formLabels[item.form] ?? item.form} · {item.body.length} 字</small></span><Check size={14} /></div>)}</section>}
+            <footer><button type="button" className="quiet-button" onClick={() => setDialogMode(null)}>取消</button><button className="primary-button">{batchPreview ? `确认补录 ${batchPreview.length} 篇` : "解析并预览"}</button></footer>
           </form>}
+          {dialogMode === "versions" && <div className="version-content"><div className="version-intro"><History size={22} /><div><strong>不可变语义版本</strong><p>版本保存完整母本快照。恢复会生成新的递增修订，不会删除历史记录。</p></div></div>{versions.length ? <div className="version-list">{versions.map((version) => <article key={version.id}><div><strong>{version.label}</strong><span>{new Date(version.createdAt).toLocaleString("zh-CN")}</span><code>{version.snapshotHash.slice(0, 16)}…</code></div><button onClick={() => { if (window.confirm(`恢复“${version.label}”并生成新的工作区修订？`)) void refreshWorkspace(() => window.moxiao!.restoreVersion(version.id)).then(() => setDialogMode(null)); }}>恢复为当前母本</button></article>)}</div> : <div className="version-empty"><Archive size={24} /><strong>尚未生成语义版本</strong><p>在顶部点击“生成版本”后，版本会出现在这里。</p></div>}</div>}
           {dialogMode === "duplicates" && <div className="duplicate-content">
             {!currentDuplicate ? <div className="duplicate-empty"><Check size={28} /><h3>没有发现重复候选</h3></div> : <>
               <div className="duplicate-nav"><span>候选 {duplicateIndex + 1} / {duplicates.length}</span><strong>{currentDuplicate.reasons.join(" · ")}</strong><div><button disabled={duplicateIndex === 0} onClick={() => setDuplicateIndex((value) => value - 1)}>上一组</button><button disabled={duplicateIndex === duplicates.length - 1} onClick={() => setDuplicateIndex((value) => value + 1)}>下一组</button></div></div>
@@ -708,7 +740,7 @@ export function App() {
             </aside>
             <div className={`publication-preview preview-${previewDevice}`}><div className="preview-toolbar"><span>实时成书预览</span><div className="preview-devices" role="group" aria-label="预览设备">{(["page", "tablet", "phone"] as const).map((device) => <button className={previewDevice === device ? "is-active" : ""} key={device} onClick={() => setPreviewDevice(device)}>{{ page: "书页", tablet: "平板", phone: "手机" }[device]}</button>)}</div><span>{publicationProject.profile.pageSize} · {publicationProject.target.toLocaleUpperCase()}</span></div><iframe title="出版分页预览" sandbox="" srcDoc={publicationHtml} /></div>
           </div>}
-        </section>
+        </section>}
       </div>}
     </main>
   );
