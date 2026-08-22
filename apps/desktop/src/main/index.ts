@@ -36,6 +36,8 @@ import {
   type PublicationProject
 } from "@moxiao/publication";
 import { createEntityId } from "@moxiao/domain";
+import { applyAssistantSuggestion, decideAssistantSuggestion, type AssistantSuggestionStatus } from "@moxiao/assistant";
+import { AssistantService } from "./assistant-service";
 import {
   LOCAL_PUBLICATION_PROJECT_ID,
   createDefaultPublicationProject,
@@ -51,6 +53,7 @@ const WORKSPACE_ID = "local-main";
 const FORM_LABELS = literaryFormLabels;
 
 let store: WorkspaceStore | null = null;
+let assistantService: AssistantService | null = null;
 
 if (process.env.MOXIAO_THEME === "dark" || process.env.MOXIAO_THEME === "light") {
   nativeTheme.themeSource = process.env.MOXIAO_THEME;
@@ -84,6 +87,11 @@ function createDemoWorkspace(): EditorialWorkspace {
 function activeStore(): WorkspaceStore {
   if (!store) throw new Error("本地数据库尚未就绪");
   return store;
+}
+
+function activeAssistantService(): AssistantService {
+  if (!assistantService) throw new Error("智校服务尚未就绪");
+  return assistantService;
 }
 
 function loadWorkspace(): EditorialWorkspace {
@@ -258,6 +266,42 @@ function registerIpc(): void {
   ipcMain.handle("moxiao:workspace:save", (_event, value: unknown) => saveWorkspace(importLegacyWorkspace(value)));
   ipcMain.handle("moxiao:workspace:create-version", (_event, label: string) => activeStore().createSemanticVersion(WORKSPACE_ID, label));
   ipcMain.handle("moxiao:workspace:list-versions", () => activeStore().listSemanticVersions(WORKSPACE_ID));
+  ipcMain.handle("moxiao:workspace:restore-version", (_event, versionId: string) => {
+    if (typeof versionId !== "string" || !versionId) throw new Error("语义版本 ID 无效");
+    const current = loadWorkspace();
+    return activeStore().restoreSemanticVersion(WORKSPACE_ID, versionId, current.revision);
+  });
+  ipcMain.handle("moxiao:assistant:settings", () => activeAssistantService().settings());
+  ipcMain.handle("moxiao:assistant:save-settings", (_event, input: Parameters<AssistantService["saveSettings"]>[0]) => activeAssistantService().saveSettings(input));
+  ipcMain.handle("moxiao:assistant:runs", () => activeStore().listAssistantRuns(WORKSPACE_ID));
+  ipcMain.handle("moxiao:assistant:suggestions", () => activeStore().listAssistantSuggestions(WORKSPACE_ID));
+  ipcMain.handle("moxiao:assistant:run", async (_event, input: { recordIds: string[]; scope: "selected" | "filtered" }) => {
+    if (!input || !Array.isArray(input.recordIds) || !input.recordIds.length || input.recordIds.length > 500 || !(input.scope === "selected" || input.scope === "filtered")) throw new Error("智校运行范围无效");
+    const selectedIds = new Set(input.recordIds);
+    const records = loadWorkspace().records.filter((record) => selectedIds.has(record.id) && record.operation !== "delete");
+    if (records.length !== selectedIds.size) throw new Error("智校范围包含不存在的作品");
+    const result = await activeAssistantService().run(records, input.scope);
+    activeStore().saveAssistantRun(WORKSPACE_ID, result.run, result.suggestions);
+    return result;
+  });
+  ipcMain.handle("moxiao:assistant:decide", (_event, input: { suggestionId: string; decision: "accepted" | "rejected" }) => {
+    if (!input || typeof input.suggestionId !== "string" || !(input.decision === "accepted" || input.decision === "rejected")) throw new Error("智校决定无效");
+    const current = activeStore().listAssistantSuggestions(WORKSPACE_ID).find((item) => item.id === input.suggestionId);
+    if (!current) throw new Error("智校建议不存在");
+    let workspace = loadWorkspace();
+    if (input.decision === "accepted") {
+      try {
+        workspace = saveWorkspace(applyAssistantSuggestion(workspace, current));
+      } catch (error) {
+        const conflict = decideAssistantSuggestion(current, "conflict");
+        activeStore().updateAssistantSuggestion(WORKSPACE_ID, conflict);
+        throw error;
+      }
+    }
+    const suggestion = decideAssistantSuggestion(current, input.decision as Extract<AssistantSuggestionStatus, "accepted" | "rejected">);
+    activeStore().updateAssistantSuggestion(WORKSPACE_ID, suggestion);
+    return { suggestion, workspace };
+  });
   ipcMain.handle("moxiao:publication:projects", () => {
     loadPublicationProject();
     return activeStore().listPublicationProjects<PublicationProject>(WORKSPACE_ID).map((project) => synchronizePublicationProject(validatePublicationProject(project), loadWorkspace()));
@@ -352,6 +396,10 @@ function registerIpc(): void {
     workspace.records.push(...parsed.map((entry, index) => createNewRecord({ ...entry, sequence: first + index })));
     return saveWorkspace(workspace);
   });
+  ipcMain.handle("moxiao:workspace:batch-preview", (_event, input: { source: string; defaultForm: string }) => {
+    if (!input || typeof input.source !== "string" || typeof input.defaultForm !== "string" || input.source.length > 10_000_000 || !FORM_LABELS[input.defaultForm as keyof typeof FORM_LABELS]) throw new Error("批量补录参数无效或超过 10 MB 安全上限");
+    return parseBatchSource(input.source, input.defaultForm, FORM_LABELS);
+  });
 
   ipcMain.handle("moxiao:workspace:duplicates", () => {
     const workspace = loadWorkspace();
@@ -381,6 +429,7 @@ function registerIpc(): void {
 
 app.whenReady().then(() => {
   store = new WorkspaceStore(join(app.getPath("userData"), "moxiao.sqlite"));
+  assistantService = new AssistantService(app.getPath("userData"));
   if (!store.hasWorkspace(WORKSPACE_ID)) store.initializeWorkspace(WORKSPACE_ID, createDemoWorkspace());
   registerIpc();
   createWindow();
@@ -388,4 +437,4 @@ app.whenReady().then(() => {
 });
 
 app.on("window-all-closed", () => { if (process.platform !== "darwin") app.quit(); });
-app.on("before-quit", () => { store?.close(); store = null; });
+app.on("before-quit", () => { store?.close(); store = null; assistantService = null; });

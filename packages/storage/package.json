@@ -10,6 +10,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@moxiao/assistant": "workspace:*",
     "@moxiao/domain": "workspace:*",
     "@moxiao/editorial": "workspace:*"
   }

@@ -111,6 +111,9 @@ importers:
 
   packages/storage:
     dependencies:
+      '@moxiao/assistant':
+        specifier: workspace:*
+        version: link:../assistant
       '@moxiao/domain':
         specifier: workspace:*
         version: link:../domain
