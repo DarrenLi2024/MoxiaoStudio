@@ -1,6 +1,6 @@
 {
   "name": "@moxiao/desktop",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "private": true,
   "license": "MPL-2.0",
   "description": "面向中文文学创作者与编校者的本地优先开放出版工作台",
@@ -11,7 +11,7 @@
     "dev": "electron-vite dev",
     "build": "electron-vite build",
     "dist:mac:raw": "pnpm build && electron-builder --mac dmg --arm64 --publish never --config.electronDist=node_modules/electron/dist",
-    "pack:mac": "pnpm build && electron-builder --mac dir --arm64 --publish never",
+    "pack:mac": "pnpm build && electron-builder --mac dir --arm64 --publish never --config.electronDist=node_modules/electron/dist",
     "preview": "electron-vite preview",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
