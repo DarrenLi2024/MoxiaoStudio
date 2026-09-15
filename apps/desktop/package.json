@@ -22,11 +22,11 @@
     "@moxiao/publication": "workspace:*",
     "@moxiao/storage": "workspace:*",
     "lucide-react": "^0.468.0",
-    "react": "^19.1.1",
+    "react": "^19.3.0",
     "react-dom": "^19.1.1"
   },
   "devDependencies": {
-    "@types/react": "^19.1.10",
+    "@types/react": "^19.3.0",
     "@types/react-dom": "^19.1.7",
     "@vitejs/plugin-react": "^4.7.0",
     "electron": "41.10.3",
